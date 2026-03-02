@@ -28,6 +28,7 @@ describe("JimengSubmitter (mock page)", () => {
           promptContentEditable: ["[contenteditable='true']"],
           submitButton: ["#submit"],
           successToastTexts: ["已加入队列"],
+          rateLimitTexts: ["操作过于频繁", "点击过快", "请稍后再试"],
           policyViolationTexts: ["不符合平台规则", "请修改后重试"],
         },
         fixedOptions: {
@@ -45,6 +46,11 @@ describe("JimengSubmitter (mock page)", () => {
         throttleMs: {
           min: 10,
           max: 20,
+          submitMinIntervalMs: 200,
+          rateLimitCooldownMsMin: 300,
+          rateLimitCooldownMsMax: 500,
+          batchPauseEveryTasks: 10,
+          batchPauseMs: 120_000,
         },
         runtime: {
           rootDir: screenshotDir,

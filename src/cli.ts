@@ -5,7 +5,7 @@ import { runBatchSubmit } from "./run/batch-runner.js";
 import { runLogin } from "./run/login.js";
 import { runReport } from "./run/report.js";
 
-const DEFAULT_CONFIG_PATH = "config/jimeng.config.json";
+const DEFAULT_CONFIG_PATH = "config/jimeng.config.jsonc";
 
 function parsePositiveNumber(value: string, optionName: string): number {
   const parsed = Number(value);

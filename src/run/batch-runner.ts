@@ -43,6 +43,8 @@ function normalizeError(error: unknown): SubmitResult {
     const status =
       error.code === "download_failed"
         ? "download_failed"
+      : error.code === "rate_limited"
+        ? "rate_limited"
         : error.code === "policy_violation"
           ? "policy_violation"
         : error.code === "submit_timeout"
@@ -121,6 +123,13 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
   }
 
   const config = await loadConfig(options.configPath);
+  const rateLimitCooldownMsMin = Math.max(0, Math.floor(config.throttleMs.rateLimitCooldownMsMin));
+  const rateLimitCooldownMsMax = Math.max(
+    rateLimitCooldownMsMin,
+    Math.floor(config.throttleMs.rateLimitCooldownMsMax),
+  );
+  const batchPauseEveryTasks = Math.max(0, Math.floor(config.throttleMs.batchPauseEveryTasks));
+  const batchPauseMs = Math.max(0, Math.floor(config.throttleMs.batchPauseMs));
   await ensureRuntimeDirs(config.runtime);
 
   const stateStore = new StateStore(config.runtime.stateDir);
@@ -136,6 +145,11 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
       input: options.input,
       reloadEachTask: options.reloadEachTask,
       manualOptions: options.manualOptions,
+      throttleMs: config.throttleMs,
+      rateLimitCooldownMsMin,
+      rateLimitCooldownMsMax,
+      batchPauseEveryTasks,
+      batchPauseMs,
     },
     "开始批量提交任务",
   );
@@ -181,6 +195,7 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
     skipped: 0,
     invalid: invalidTasks.length,
   };
+  let processedSubmittableTasks = 0;
 
   const session = await openPersistentSession({
     userDataDir: config.runtime.profileDir,
@@ -205,7 +220,7 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
       await waitForManualOptionsReady();
     }
 
-    for (const task of tasksWithStartAt) {
+    for (const [taskIndex, task] of tasksWithStartAt.entries()) {
       if (options.resume && stateStore.isAnyAlreadySubmitted(task.resumeKeys)) {
         summary.skipped += 1;
         await stateStore.append(
@@ -234,7 +249,6 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
         "开始处理任务",
       );
 
-      let success = false;
       const maxAttempts = options.maxRetries + 1;
 
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -253,7 +267,6 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
           );
 
           await submitter.submitTask(task, localImagePath);
-          success = true;
 
           await stateStore.append(
             buildStateRecord({
@@ -307,11 +320,39 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
             break;
           }
 
+          if (normalized.status === "rate_limited" && rateLimitCooldownMsMax > 0) {
+            const cooldownMs = randomBetween(rateLimitCooldownMsMin, rateLimitCooldownMsMax);
+            logger.info(
+              { taskKey: task.taskKey, attempt, cooldownMs },
+              "命中平台频控，冷却后重试当前任务",
+            );
+            await sleep(cooldownMs);
+            continue;
+          }
+
           await sleep(800 * attempt);
         }
       }
 
-      if (!success) {
+      processedSubmittableTasks += 1;
+      const hasMoreTasks = taskIndex < tasksWithStartAt.length - 1;
+      if (!hasMoreTasks) {
+        continue;
+      }
+
+      if (
+        batchPauseEveryTasks > 0 &&
+        batchPauseMs > 0 &&
+        processedSubmittableTasks % batchPauseEveryTasks === 0
+      ) {
+        logger.info(
+          {
+            processedSubmittableTasks,
+            batchPauseMs,
+          },
+          "达到批次阈值，开始冷却等待",
+        );
+        await sleep(batchPauseMs);
         continue;
       }
 

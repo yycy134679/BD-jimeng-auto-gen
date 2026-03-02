@@ -1,0 +1,99 @@
+{
+  // 即梦视频生成页地址（页面改版后这里可能需要更新）
+  "baseUrl": "https://jimeng.jianying.com/ai-tool/generate?type=video",
+  // 是否使用无头浏览器（true=后台运行；false=可视化窗口）
+  "headless": false,
+  "selectors": {
+    // 图片上传 input 选择器候选，按顺序尝试匹配
+    "fileInput": [
+      "input[type='file']",
+      "input[type='file'][multiple]"
+    ],
+    // 提示词 textarea 选择器候选
+    "promptTextarea": [
+      "textarea[placeholder*='视频创意无限可能']",
+      "textarea"
+    ],
+    // contenteditable 提示词输入框候选（某些页面不使用 textarea）
+    "promptContentEditable": [
+      "[contenteditable='true']"
+    ],
+    // 提交按钮候选（文案/类名变化时可在这里补充）
+    "submitButton": [
+      "button[class*='submit-button-']",
+      "button[class*='submit-button']",
+      "button:has-text('生成')",
+      "button:has-text('立即生成')"
+    ],
+    // 判定“提交成功”的提示文案关键词（命中任一即可）
+    "successToastTexts": [
+      "提交成功",
+      "已加入队列"
+    ],
+    // 判定“频率限制/点击过快”的提示文案关键词
+    "rateLimitTexts": [
+      "操作过于频繁",
+      "提交过于频繁",
+      "点击过快",
+      "请稍后再试"
+    ],
+    // 判定“违规”提示文案关键词（命中后该任务不重试）
+    "policyViolationTexts": [
+      "不符合平台规则",
+      "违规",
+      "请修改后重试"
+    ]
+  },
+  "fixedOptions": {
+    // 模型名称（需与页面显示文案一致）
+    "model": "Seedance 2.0",
+    // 参考模式名称（与模型可能有兼容性约束）
+    "referenceMode": "全能参考",
+    // 比例（例如 9:16 / 16:9）
+    "ratio": "9:16",
+    // 分辨率（例如 720P / 1080P）
+    "resolution": "720P",
+    // 时长（例如 5s / 10s / 15s）
+    "duration": "15s"
+  },
+  "timeouts": {
+    // 页面导航超时（毫秒）
+    "navigationMs": 45000,
+    // 页面操作超时（毫秒）
+    "actionMs": 15000,
+    // 等待成功/违规提示超时（毫秒）
+    "toastMs": 30000,
+    // 图片下载超时（毫秒）
+    "downloadMs": 30000
+  },
+  "throttleMs": {
+    // 每条任务间隔随机等待下限（毫秒）
+    "min": 3000,
+    // 每条任务间隔随机等待上限（毫秒）
+    "max": 5000,
+    // 两次点击“提交”之间的最小间隔（毫秒）
+    "submitMinIntervalMs": 10000,
+    // 命中频控后重试前冷却最小值（毫秒）
+    "rateLimitCooldownMsMin": 180000,
+    // 命中频控后重试前冷却最大值（毫秒）
+    "rateLimitCooldownMsMax": 240000,
+    // 每处理 N 条任务后触发一次长冷却（成功/失败都计数）
+    "batchPauseEveryTasks": 10,
+    // 长冷却时长（毫秒）
+    "batchPauseMs": 120000
+  },
+  "runtime": {
+    // 运行时根目录（建议保持默认）
+    "rootDir": ".runtime",
+    // 浏览器登录态目录（用于持久化 cookie/session）
+    "profileDir": ".runtime/profile",
+    // 下载图片缓存目录
+    "imagesDir": ".runtime/images",
+    // 运行日志目录
+    "logsDir": ".runtime/logs",
+    // 失败现场截图和 HTML 目录
+    "screenshotsDir": ".runtime/screenshots",
+    // 断点状态目录（runs/checkpoint）
+    "stateDir": ".runtime/state"
+  }
+}

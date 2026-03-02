@@ -3,6 +3,7 @@ export type TaskStatus =
   | "download_failed"
   | "invalid_input"
   | "ui_selector_failed"
+  | "rate_limited"
   | "policy_violation"
   | "submit_timeout"
   | "submit_failed"
@@ -63,6 +64,7 @@ export interface JimengConfig {
     promptContentEditable: string[];
     submitButton: string[];
     successToastTexts: string[];
+    rateLimitTexts: string[];
     policyViolationTexts: string[];
   };
   fixedOptions: {
@@ -81,6 +83,11 @@ export interface JimengConfig {
   throttleMs: {
     min: number;
     max: number;
+    submitMinIntervalMs: number;
+    rateLimitCooldownMsMin: number;
+    rateLimitCooldownMsMax: number;
+    batchPauseEveryTasks: number;
+    batchPauseMs: number;
   };
   runtime: RuntimeDirs;
 }
@@ -122,6 +129,7 @@ export interface SubmitResult {
 
 export type SubmitErrorCode =
   | "ui_selector_failed"
+  | "rate_limited"
   | "policy_violation"
   | "submit_timeout"
   | "submit_failed"

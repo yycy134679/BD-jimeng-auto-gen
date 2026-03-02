@@ -26,7 +26,9 @@ npx playwright install chromium
 
 ## 配置
 
-默认配置文件：`config/jimeng.config.json`
+默认配置文件：`config/jimeng.config.jsonc`
+支持在配置文件里写中文注释（`//` 或 `/* ... */`）。
+同时保留 `config/jimeng.config.json`（无注释版，兼容严格 JSON 校验器）。
 
 关键字段：
 
@@ -34,10 +36,16 @@ npx playwright install chromium
   - 推荐：`https://jimeng.jianying.com/ai-tool/generate?type=video`
 - `selectors`: 页面选择器候选列表
 - `selectors.policyViolationTexts`: 违规文案关键词（命中后立即跳过该任务）
+- `selectors.rateLimitTexts`: 频控文案关键词（如“操作过于频繁”“点击过快”）
 - `fixedOptions`: 固定模型参数（默认 `Seedance 2.0 / 全能参考 / 9:16 / 720P / 15s`）
   - 如果你的账号当前只显示 `视频 3.0 Fast / 首尾帧 / 16:9 / 5s`，请改成页面上真实可选的文案
   - 当“参考模式”和“模型”不兼容时，脚本会优先锁定 `model`
 - `timeouts`: 导航、操作、下载、toast 等超时
+- `throttleMs`: 节流参数
+  - `min/max`: 每条任务之间的短等待（毫秒）
+  - `submitMinIntervalMs`: 两次“点击提交”之间的最小间隔（毫秒，默认 25000）
+  - `rateLimitCooldownMsMin/rateLimitCooldownMsMax`: 命中频控后重试前冷却区间（毫秒，默认 180000-240000）
+  - `batchPauseEveryTasks/batchPauseMs`: 每处理 N 条任务（无论成功失败）后的长等待（毫秒），默认每 10 条等待 120000ms（2 分钟）
 
 ## 输入文件格式
 
@@ -130,7 +138,7 @@ npm run report -- --run-id 20260302-101500
 ## 常见问题
 
 1. 找不到元素（`ui_selector_failed`）
-- 说明页面结构或文案变了，更新 `config/jimeng.config.json` 里的选择器和固定参数文案。
+- 说明页面结构或文案变了，更新 `config/jimeng.config.jsonc` 里的选择器和固定参数文案。
 
 2. 一直收不到成功提示（`submit_timeout`）
 - 提高 `timeouts.toastMs`，并确认当前页面提示文案是否仍为 `提交成功` 或 `已加入队列`。

@@ -37,6 +37,8 @@ export class JimengSubmitter {
 
   private readonly applyFixedOptionsEnabled: boolean;
 
+  private lastSubmitClickedAt = 0;
+
   public constructor(options: SubmitterOptions) {
     this.page = options.page;
     this.config = options.config;
@@ -101,8 +103,10 @@ export class JimengSubmitter {
 
     await this.ensureSubmitButtonEnabled(submitButton, task.taskKey);
     await this.lockCriticalOptionsRightBeforeSubmit(task.taskKey);
+    await this.waitForSubmitInterval(task.taskKey);
     const baselineBodyText = await this.page.evaluate(() => document.body.innerText ?? "");
     await submitButton.click({ timeout: this.config.timeouts.actionMs });
+    this.lastSubmitClickedAt = Date.now();
 
     await this.waitForSubmissionOutcome(task.taskKey, baselineBodyText, task.prompt);
   }
@@ -488,6 +492,7 @@ export class JimengSubmitter {
     prompt: string,
   ): Promise<void> {
     const successTargets = this.config.selectors.successToastTexts;
+    const rateLimitTargets = this.config.selectors.rateLimitTexts;
     const violationTargets = this.config.selectors.policyViolationTexts;
     const inferredSuccessTargets = ["生成中", "再次生成"];
     const promptProbe = this.buildPromptProbe(prompt);
@@ -497,12 +502,14 @@ export class JimengSubmitter {
         ({
           baseline,
           successTexts,
+          rateLimitTexts,
           violationTexts,
           fallbackSuccessTexts,
           promptProbeText,
         }: {
           baseline: string;
           successTexts: string[];
+          rateLimitTexts: string[];
           violationTexts: string[];
           fallbackSuccessTexts: string[];
           promptProbeText: string;
@@ -526,6 +533,14 @@ export class JimengSubmitter {
           };
 
           const currentText = document.body.innerText ?? "";
+
+          for (const text of rateLimitTexts) {
+            const baselineCount = countOccurrences(baseline, text);
+            const currentCount = countOccurrences(currentText, text);
+            if (currentCount > baselineCount) {
+              return { type: "rate_limited", text };
+            }
+          }
 
           for (const text of violationTexts) {
             const baselineCount = countOccurrences(baseline, text);
@@ -566,6 +581,7 @@ export class JimengSubmitter {
         {
           baseline: baselineBodyText,
           successTexts: successTargets,
+          rateLimitTexts: rateLimitTargets,
           violationTexts: violationTargets,
           fallbackSuccessTexts: inferredSuccessTargets,
           promptProbeText: promptProbe,
@@ -574,7 +590,7 @@ export class JimengSubmitter {
       );
 
       const outcome = (await handle.jsonValue()) as
-        | { type: "success" | "violation"; text: string }
+        | { type: "success" | "rate_limited" | "violation"; text: string }
         | undefined;
       if (!outcome) {
         const metadata = await this.captureArtifacts(taskKey, "toast-timeout");
@@ -583,6 +599,11 @@ export class JimengSubmitter {
           `在 ${this.config.timeouts.toastMs}ms 内未检测到成功/违规/记录更新信号`,
           metadata,
         );
+      }
+
+      if (outcome.type === "rate_limited") {
+        const metadata = await this.captureArtifacts(taskKey, "rate-limited");
+        throw new SubmitWorkflowError("rate_limited", `命中频率限制提示: ${outcome.text}`, metadata);
       }
 
       if (outcome.type === "violation") {
@@ -728,6 +749,24 @@ export class JimengSubmitter {
     }
 
     return normalized.slice(0, 18);
+  }
+
+  private async waitForSubmitInterval(taskKey: string): Promise<void> {
+    const minIntervalMs = Math.max(0, Math.floor(this.config.throttleMs.submitMinIntervalMs));
+    if (minIntervalMs <= 0 || this.lastSubmitClickedAt <= 0) {
+      return;
+    }
+
+    const elapsed = Date.now() - this.lastSubmitClickedAt;
+    const remaining = minIntervalMs - elapsed;
+    if (remaining <= 0) {
+      return;
+    }
+
+    const jitterMs = 250 + Math.floor(Math.random() * 700);
+    const waitMs = remaining + jitterMs;
+    this.logger.info({ taskKey, waitMs, minIntervalMs }, "提交前节流等待，避免点击过快");
+    await this.page.waitForTimeout(waitMs);
   }
 
   private async captureArtifacts(

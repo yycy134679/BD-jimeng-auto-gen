@@ -17,6 +17,7 @@ const DEFAULT_CONFIG: JimengConfig = {
       "button:has-text('立即生成')",
     ],
     successToastTexts: ["提交成功", "已加入队列"],
+    rateLimitTexts: ["操作过于频繁", "提交过于频繁", "点击过快", "请稍后再试"],
     policyViolationTexts: ["不符合平台规则", "违规", "请修改后重试"],
   },
   fixedOptions: {
@@ -35,6 +36,11 @@ const DEFAULT_CONFIG: JimengConfig = {
   throttleMs: {
     min: 1_500,
     max: 3_000,
+    submitMinIntervalMs: 25_000,
+    rateLimitCooldownMsMin: 180_000,
+    rateLimitCooldownMsMax: 240_000,
+    batchPauseEveryTasks: 10,
+    batchPauseMs: 120_000,
   },
   runtime: {
     rootDir: ".runtime",
@@ -76,6 +82,85 @@ function deepMerge<T>(base: T, override: Partial<T>): T {
   return merged as T;
 }
 
+function stripJsonComments(input: string): string {
+  let output = "";
+  let inString = false;
+  let isEscaped = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index];
+    const next = input[index + 1];
+
+    if (inLineComment) {
+      if (char === "\n" || char === "\r") {
+        inLineComment = false;
+        output += char;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (char === "*" && next === "/") {
+        inBlockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (inString) {
+      output += char;
+      if (isEscaped) {
+        isEscaped = false;
+        continue;
+      }
+
+      if (char === "\\") {
+        isEscaped = true;
+        continue;
+      }
+
+      if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      output += char;
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      inLineComment = true;
+      index += 1;
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      inBlockComment = true;
+      index += 1;
+      continue;
+    }
+
+    output += char;
+  }
+
+  return output;
+}
+
+function parseConfigFile(raw: string, filePath: string): Partial<JimengConfig> {
+  const sanitized = stripJsonComments(raw);
+  try {
+    return JSON.parse(sanitized) as Partial<JimengConfig>;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`配置文件解析失败: ${filePath}，${message}`);
+  }
+}
+
 function resolveRuntimeDirs(root: string, runtime: RuntimeDirs): RuntimeDirs {
   return {
     rootDir: path.resolve(root, runtime.rootDir),
@@ -93,7 +178,8 @@ export async function loadConfig(configPath: string): Promise<JimengConfig> {
 
   let merged = DEFAULT_CONFIG;
   if (await fs.pathExists(absolutePath)) {
-    const fileConfig = (await fs.readJson(absolutePath)) as Partial<JimengConfig>;
+    const rawConfig = await fs.readFile(absolutePath, "utf8");
+    const fileConfig = parseConfigFile(rawConfig, absolutePath);
     merged = deepMerge(DEFAULT_CONFIG, fileConfig);
   }
 
