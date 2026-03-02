@@ -21,7 +21,8 @@ describe("readInputTasks", () => {
     const result = await readInputTasks(csvPath);
 
     assert.equal(result.validTasks.length, 1);
-    assert.equal(result.validTasks[0].taskKey, "id-1");
+    assert.match(result.validTasks[0].taskKey, /^id-1__[a-f0-9]{12}$/);
+    assert.equal(result.validTasks[0].resumeKeys.includes("id-1"), true);
     assert.equal(result.invalidTasks.length, 1);
     assert.equal(result.invalidTasks[0].status, "invalid_input");
   });
@@ -41,8 +42,8 @@ describe("readInputTasks", () => {
     const result = await readInputTasks(xlsxPath, "Sheet1");
 
     assert.equal(result.validTasks.length, 2);
-    assert.equal(result.validTasks[0].taskKey, "pid-1");
-    assert.equal(result.validTasks[1].taskKey, "tid-2");
+    assert.match(result.validTasks[0].taskKey, /^pid-1__[a-f0-9]{12}$/);
+    assert.match(result.validTasks[1].taskKey, /^tid-2__[a-f0-9]{12}$/);
     assert.equal(result.invalidTasks.length, 0);
   });
 });

@@ -97,6 +97,15 @@ function buildStateRecord(input: {
   };
 }
 
+function summarizePrompt(prompt: string, maxLength = 48): string {
+  const compact = prompt.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxLength) {
+    return compact;
+  }
+
+  return `${compact.slice(0, maxLength)}...`;
+}
+
 export interface SubmitRunSummary {
   runId: string;
   total: number;
@@ -132,6 +141,20 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
   );
 
   const { validTasks, invalidTasks } = await readInputTasks(options.input, options.sheet);
+  const duplicateTaskKeys = new Map<string, number>();
+  for (const task of validTasks) {
+    duplicateTaskKeys.set(task.taskKey, (duplicateTaskKeys.get(task.taskKey) ?? 0) + 1);
+  }
+  const duplicatedEntries = Array.from(duplicateTaskKeys.entries()).filter(([, count]) => count > 1);
+  if (duplicatedEntries.length > 0) {
+    logger.warn(
+      {
+        duplicatedTaskKeyCount: duplicatedEntries.length,
+        duplicatedTaskKeys: duplicatedEntries.slice(0, 8).map(([taskKey, count]) => ({ taskKey, count })),
+      },
+      "输入数据存在重复 taskKey（可能是完全重复行），重复记录在 --resume 模式下会被视为同一任务",
+    );
+  }
 
   for (const invalid of invalidTasks) {
     await stateStore.append(
@@ -183,7 +206,7 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
     }
 
     for (const task of tasksWithStartAt) {
-      if (options.resume && stateStore.isAlreadySubmitted(task.taskKey)) {
+      if (options.resume && stateStore.isAnyAlreadySubmitted(task.resumeKeys)) {
         summary.skipped += 1;
         await stateStore.append(
           buildStateRecord({
@@ -196,9 +219,20 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
             lastError: "任务在历史记录中已成功提交，resume 已跳过",
           }),
         );
-        logger.info({ taskKey: task.taskKey }, "跳过已提交任务");
+        logger.info({ taskKey: task.taskKey, inputRow: task.inputRow }, "跳过已提交任务");
         continue;
       }
+
+      logger.info(
+        {
+          taskKey: task.taskKey,
+          inputRow: task.inputRow,
+          taskId: task.taskId,
+          sourceFile: task.sourceFile,
+          promptPreview: summarizePrompt(task.prompt),
+        },
+        "开始处理任务",
+      );
 
       let success = false;
       const maxAttempts = options.maxRetries + 1;

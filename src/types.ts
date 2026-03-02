@@ -10,6 +10,7 @@ export type TaskStatus =
 
 export interface NormalizedInputTask {
   taskKey: string;
+  resumeKeys: string[];
   taskId?: string;
   imageUrl: string;
   prompt: string;

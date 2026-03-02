@@ -74,6 +74,7 @@ describe("JimengSubmitter (mock page)", () => {
       await submitter.submitTask(
         {
           taskKey: "task-1",
+          resumeKeys: ["task-1"],
           taskId: "task-1",
           imageUrl: "https://example.com/a.jpg",
           prompt: "demo prompt",

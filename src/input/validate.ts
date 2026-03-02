@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { InvalidInputTask } from "../types.js";
-import { buildTaskKey, normalizeOptionalId } from "../utils/hash.js";
+import { buildLegacyTaskKey, buildTaskKey, normalizeOptionalId } from "../utils/hash.js";
 
 const InputSchema = z.object({
   imageUrl: z
@@ -34,6 +34,7 @@ export interface DraftInput {
 
 export interface ValidatedInput {
   taskKey: string;
+  resumeKeys: string[];
   taskId?: string;
   imageUrl: string;
   prompt: string;
@@ -72,14 +73,22 @@ export function validateDraftInputs(drafts: DraftInput[]): {
     const normalized = parsed.data;
     const taskId = normalizeOptionalId(normalized.taskId);
     const pid = normalizeOptionalId(normalized.pid);
+    const taskKey = buildTaskKey({
+      taskId,
+      pid,
+      imageUrl: normalized.imageUrl,
+      prompt: normalized.prompt,
+    });
+    const legacyTaskKey = buildLegacyTaskKey({
+      taskId,
+      pid,
+      imageUrl: normalized.imageUrl,
+      prompt: normalized.prompt,
+    });
 
     valid.push({
-      taskKey: buildTaskKey({
-        taskId,
-        pid,
-        imageUrl: normalized.imageUrl,
-        prompt: normalized.prompt,
-      }),
+      taskKey,
+      resumeKeys: Array.from(new Set([taskKey, legacyTaskKey])),
       taskId: taskId ?? pid,
       imageUrl: normalized.imageUrl,
       prompt: normalized.prompt,

@@ -9,7 +9,12 @@ export function normalizeOptionalId(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-export function buildTaskKey(input: {
+export function buildContentHash(imageUrl: string, prompt: string): string {
+  const base = `${imageUrl.trim()}|${prompt.trim()}`;
+  return crypto.createHash("sha256").update(base).digest("hex");
+}
+
+export function buildLegacyTaskKey(input: {
   taskId?: string;
   pid?: string;
   imageUrl: string;
@@ -20,6 +25,21 @@ export function buildTaskKey(input: {
     return preferredId;
   }
 
-  const base = `${input.imageUrl.trim()}|${input.prompt.trim()}`;
-  return crypto.createHash("sha256").update(base).digest("hex");
+  return buildContentHash(input.imageUrl, input.prompt);
+}
+
+export function buildTaskKey(input: {
+  taskId?: string;
+  pid?: string;
+  imageUrl: string;
+  prompt: string;
+}): string {
+  const preferredId = normalizeOptionalId(input.taskId) ?? normalizeOptionalId(input.pid);
+  const contentHash = buildContentHash(input.imageUrl, input.prompt);
+
+  if (preferredId) {
+    return `${preferredId}__${contentHash.slice(0, 12)}`;
+  }
+
+  return contentHash;
 }

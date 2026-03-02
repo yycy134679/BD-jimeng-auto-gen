@@ -61,7 +61,7 @@ sku_001,https://xxx/a.jpg,一个电商产品镜头推进展示
 sku_002,https://xxx/b.jpg,运动鞋静物旋转展示，光影高级
 ```
 
-主键规则：优先 `task_id/pid`，缺失时回退 `sha256(image_url + prompt)`。
+主键规则：优先 `task_id/pid` 作为前缀，并拼接 `sha256(image_url + prompt)` 的短哈希（避免同一商品多条文案冲突）；缺失时使用完整 `sha256(image_url + prompt)`。
 
 ## 使用
 

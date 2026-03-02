@@ -65,6 +65,16 @@ export class StateStore {
     return this.checkpoint[taskKey]?.status === "submitted";
   }
 
+  public isAnyAlreadySubmitted(taskKeys: string[]): boolean {
+    for (const key of taskKeys) {
+      if (this.isAlreadySubmitted(key)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   public async append(record: StateRecord): Promise<void> {
     const runFile = this.resolveRunFile(record.runId);
     await fs.ensureDir(path.dirname(runFile));
