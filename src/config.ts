@@ -16,7 +16,7 @@ const DEFAULT_CONFIG: JimengConfig = {
       "button:has-text('生成')",
       "button:has-text('立即生成')",
     ],
-    successToastTexts: ["提交成功", "已加入队列", "排队加速中"],
+    successToastTexts: ["提交成功", "已加入队列"],
     policyViolationTexts: ["不符合平台规则", "违规", "请修改后重试"],
   },
   fixedOptions: {

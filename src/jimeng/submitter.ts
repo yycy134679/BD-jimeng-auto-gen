@@ -22,101 +22,6 @@ interface SubmitterOptions {
   applyFixedOptions: boolean;
 }
 
-interface SubmissionSignalArgs {
-  baseline: string;
-  baselineRecordIds: string[];
-  successTexts: string[];
-  violationTexts: string[];
-  fallbackSuccessTexts: string[];
-  promptProbeText: string;
-}
-
-type SubmissionSignal = { type: "success" | "violation"; text: string };
-
-function detectSubmissionOutcomeSignal({
-  baseline,
-  baselineRecordIds,
-  successTexts,
-  violationTexts,
-  fallbackSuccessTexts,
-  promptProbeText,
-}: SubmissionSignalArgs): SubmissionSignal | undefined {
-  const countOccurrences = (source: string, term: string): number => {
-    if (!term) {
-      return 0;
-    }
-
-    let fromIndex = 0;
-    let count = 0;
-    while (fromIndex < source.length) {
-      const index = source.indexOf(term, fromIndex);
-      if (index === -1) {
-        break;
-      }
-      count += 1;
-      fromIndex = index + term.length;
-    }
-    return count;
-  };
-
-  const currentText = document.body.innerText ?? "";
-
-  for (const text of violationTexts) {
-    const baselineCount = countOccurrences(baseline, text);
-    const currentCount = countOccurrences(currentText, text);
-    if (currentCount > baselineCount) {
-      return { type: "violation", text };
-    }
-  }
-
-  for (const text of successTexts) {
-    const baselineCount = countOccurrences(baseline, text);
-    const currentCount = countOccurrences(currentText, text);
-    if (currentCount > baselineCount) {
-      return { type: "success", text };
-    }
-  }
-
-  if (promptProbeText) {
-    const baselineCount = countOccurrences(baseline, promptProbeText);
-    const currentCount = countOccurrences(currentText, promptProbeText);
-    if (currentCount > baselineCount) {
-      return { type: "success", text: `prompt_probe:${promptProbeText}` };
-    }
-  }
-
-  let baselineFallbackCount = 0;
-  let currentFallbackCount = 0;
-  for (const text of fallbackSuccessTexts) {
-    baselineFallbackCount += countOccurrences(baseline, text);
-    currentFallbackCount += countOccurrences(currentText, text);
-  }
-  if (currentFallbackCount > baselineFallbackCount) {
-    return { type: "success", text: "fallback_record_signal" };
-  }
-
-  const baselineRecordSet = new Set(
-    baselineRecordIds
-      .map((value) => (typeof value === "string" ? value.trim() : ""))
-      .filter(Boolean),
-  );
-  const recordNodes = document.querySelectorAll<HTMLElement>("[data-id], [id^='item_']");
-  for (const node of Array.from(recordNodes)) {
-    const candidates = [node.getAttribute("data-id"), node.id];
-    for (const candidate of candidates) {
-      const normalized = candidate?.trim() ?? "";
-      if (!normalized) {
-        continue;
-      }
-      if (!baselineRecordSet.has(normalized)) {
-        return { type: "success", text: "record_id_delta" };
-      }
-    }
-  }
-
-  return undefined;
-}
-
 export class JimengSubmitter {
   private readonly page: Page;
 
@@ -196,13 +101,10 @@ export class JimengSubmitter {
 
     await this.ensureSubmitButtonEnabled(submitButton, task.taskKey);
     await this.lockCriticalOptionsRightBeforeSubmit(task.taskKey);
-    const [baselineBodyText, baselineRecordIds] = await Promise.all([
-      this.page.evaluate(() => document.body.innerText ?? ""),
-      this.collectRecordIdentifiers(),
-    ]);
+    const baselineBodyText = await this.page.evaluate(() => document.body.innerText ?? "");
     await submitButton.click({ timeout: this.config.timeouts.actionMs });
 
-    await this.waitForSubmissionOutcome(task.taskKey, baselineBodyText, baselineRecordIds, task.prompt);
+    await this.waitForSubmissionOutcome(task.taskKey, baselineBodyText, task.prompt);
   }
 
   private async gotoCreatePage(): Promise<void> {
@@ -580,68 +482,100 @@ export class JimengSubmitter {
     return `combobox=[${comboText}], ratio=[${ratioText}]`;
   }
 
-  private async collectRecordIdentifiers(): Promise<string[]> {
-    return this.page
-      .evaluate(() => {
-        const ids = new Set<string>();
-        const nodes = document.querySelectorAll<HTMLElement>("[data-id], [id^='item_']");
-        for (const node of Array.from(nodes)) {
-          const dataId = node.getAttribute("data-id")?.trim() ?? "";
-          if (dataId) {
-            ids.add(dataId);
-          }
-
-          const id = node.id?.trim() ?? "";
-          if (id) {
-            ids.add(id);
-          }
-        }
-        return Array.from(ids);
-      })
-      .catch(() => []);
-  }
-
-  private async recoverSubmissionOutcome(
-    signalArgs: SubmissionSignalArgs,
-    timeoutMs: number,
-  ): Promise<SubmissionSignal | undefined> {
-    const deadline = Date.now() + Math.max(timeoutMs, 0);
-    while (Date.now() < deadline) {
-      const outcome = await this.page.evaluate(detectSubmissionOutcomeSignal, signalArgs).catch(() => undefined);
-      if (outcome) {
-        return outcome as SubmissionSignal;
-      }
-      await this.page.waitForTimeout(250);
-    }
-
-    return undefined;
-  }
-
   private async waitForSubmissionOutcome(
     taskKey: string,
     baselineBodyText: string,
-    baselineRecordIds: string[],
     prompt: string,
   ): Promise<void> {
     const successTargets = this.config.selectors.successToastTexts;
     const violationTargets = this.config.selectors.policyViolationTexts;
-    const inferredSuccessTargets = ["生成中", "再次生成", "排队中", "排队加速中", "当前排队(", "预计剩余"];
+    const inferredSuccessTargets = ["生成中", "再次生成"];
     const promptProbe = this.buildPromptProbe(prompt);
-    const signalArgs: SubmissionSignalArgs = {
-      baseline: baselineBodyText,
-      baselineRecordIds,
-      successTexts: successTargets,
-      violationTexts: violationTargets,
-      fallbackSuccessTexts: inferredSuccessTargets,
-      promptProbeText: promptProbe,
-    };
 
     try {
-      const handle = await this.page.waitForFunction(detectSubmissionOutcomeSignal, signalArgs, {
-        timeout: this.config.timeouts.toastMs,
-      });
+      const handle = await this.page.waitForFunction(
+        ({
+          baseline,
+          successTexts,
+          violationTexts,
+          fallbackSuccessTexts,
+          promptProbeText,
+        }: {
+          baseline: string;
+          successTexts: string[];
+          violationTexts: string[];
+          fallbackSuccessTexts: string[];
+          promptProbeText: string;
+        }) => {
+          const countOccurrences = (source: string, term: string): number => {
+            if (!term) {
+              return 0;
+            }
 
-      const outcome = (await handle.jsonValue()) as SubmissionSignal | undefined;
+            let fromIndex = 0;
+            let count = 0;
+            while (fromIndex < source.length) {
+              const index = source.indexOf(term, fromIndex);
+              if (index === -1) {
+                break;
+              }
+              count += 1;
+              fromIndex = index + term.length;
+            }
+            return count;
+          };
+
+          const currentText = document.body.innerText ?? "";
+
+          for (const text of violationTexts) {
+            const baselineCount = countOccurrences(baseline, text);
+            const currentCount = countOccurrences(currentText, text);
+            if (currentCount > baselineCount) {
+              return { type: "violation", text };
+            }
+          }
+
+          for (const text of successTexts) {
+            const baselineCount = countOccurrences(baseline, text);
+            const currentCount = countOccurrences(currentText, text);
+            if (currentCount > baselineCount) {
+              return { type: "success", text };
+            }
+          }
+
+          if (promptProbeText) {
+            const baselineCount = countOccurrences(baseline, promptProbeText);
+            const currentCount = countOccurrences(currentText, promptProbeText);
+            if (currentCount > baselineCount) {
+              return { type: "success", text: `prompt_probe:${promptProbeText}` };
+            }
+          }
+
+          let baselineFallbackCount = 0;
+          let currentFallbackCount = 0;
+          for (const text of fallbackSuccessTexts) {
+            baselineFallbackCount += countOccurrences(baseline, text);
+            currentFallbackCount += countOccurrences(currentText, text);
+          }
+          if (currentFallbackCount > baselineFallbackCount) {
+            return { type: "success", text: "fallback_record_signal" };
+          }
+
+          return undefined;
+        },
+        {
+          baseline: baselineBodyText,
+          successTexts: successTargets,
+          violationTexts: violationTargets,
+          fallbackSuccessTexts: inferredSuccessTargets,
+          promptProbeText: promptProbe,
+        },
+        { timeout: this.config.timeouts.toastMs },
+      );
+
+      const outcome = (await handle.jsonValue()) as
+        | { type: "success" | "violation"; text: string }
+        | undefined;
       if (!outcome) {
         const metadata = await this.captureArtifacts(taskKey, "toast-timeout");
         throw new SubmitWorkflowError(
@@ -664,36 +598,10 @@ export class JimengSubmitter {
         throw error;
       }
 
-      const recoveredOutcome = await this.recoverSubmissionOutcome(
-        signalArgs,
-        Math.min(this.config.timeouts.toastMs, 8_000),
-      );
-      if (recoveredOutcome?.type === "violation") {
-        const metadata = await this.captureArtifacts(taskKey, "policy-violation");
-        throw new SubmitWorkflowError(
-          "policy_violation",
-          `命中违规提示: ${recoveredOutcome.text}`,
-          metadata,
-        );
-      }
-      if (recoveredOutcome?.type === "success") {
-        this.logger.warn(
-          {
-            taskKey,
-            signal: recoveredOutcome.text,
-            reason: error instanceof Error ? error.message : String(error),
-          },
-          "提交结果监听异常，但恢复探测命中成功信号，按成功继续",
-        );
-        return;
-      }
-
       const metadata = await this.captureArtifacts(taskKey, "toast-timeout");
       throw new SubmitWorkflowError(
         "submit_timeout",
-        `在 ${this.config.timeouts.toastMs}ms 内未检测到成功/违规/记录更新信号（监听异常: ${
-          error instanceof Error ? error.message : String(error)
-        }）`,
+        `在 ${this.config.timeouts.toastMs}ms 内未检测到成功/违规/记录更新信号`,
         metadata,
       );
     }
@@ -714,7 +622,7 @@ export class JimengSubmitter {
     if (resolution && !selection.resolutionApplied) {
       this.logger.warn(
         { label: resolution },
-        "上传后未命中分辨率设置（当前模型/模式可能不展示分辨率选项，不影响本次任务继续提交）",
+        "上传后未命中分辨率设置（当前模型/模式可能不展示分辨率选项），继续执行",
       );
     }
   }

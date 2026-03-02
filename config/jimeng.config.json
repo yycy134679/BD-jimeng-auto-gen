@@ -21,8 +21,7 @@
     ],
     "successToastTexts": [
       "提交成功",
-      "已加入队列",
-      "排队加速中"
+      "已加入队列"
     ],
     "policyViolationTexts": [
       "不符合平台规则",

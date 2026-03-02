@@ -7,7 +7,7 @@
 - 支持 `CSV/XLSX` 输入（必填 `image_url` + `prompt`，可选 `task_id`/`pid`）
 - 图片 URL 自动下载后上传
 - Playwright 可视化串行提交
-- 成功判定：页面出现成功提示（如 `提交成功` / `已加入队列` / `排队加速中`），或检测到任务记录新增
+- 成功判定：页面出现 `提交成功` 或 `已加入队列`
 - 违规判定：命中违规文案后当前任务立即跳过（不重试），继续下一条
 - 断点续跑（`--resume` 跳过历史已提交）
 - 失败重试、日志、截图和 HTML 现场
@@ -36,7 +36,6 @@ npx playwright install chromium
 - `selectors.policyViolationTexts`: 违规文案关键词（命中后立即跳过该任务）
 - `fixedOptions`: 固定模型参数（默认 `Seedance 2.0 / 全能参考 / 9:16 / 720P / 15s`）
   - 如果你的账号当前只显示 `视频 3.0 Fast / 首尾帧 / 16:9 / 5s`，请改成页面上真实可选的文案
-  - 某些模型（如 `Seedance 2.0`）可能不展示分辨率选项，脚本会告警并继续提交，不视为失败
   - 当“参考模式”和“模型”不兼容时，脚本会优先锁定 `model`
 - `timeouts`: 导航、操作、下载、toast 等超时
 
@@ -134,7 +133,7 @@ npm run report -- --run-id 20260302-101500
 - 说明页面结构或文案变了，更新 `config/jimeng.config.json` 里的选择器和固定参数文案。
 
 2. 一直收不到成功提示（`submit_timeout`）
-- 提高 `timeouts.toastMs`，并确认当前页面提示文案；新版默认还会识别 `排队加速中` 与“任务记录新增”信号。
+- 提高 `timeouts.toastMs`，并确认当前页面提示文案是否仍为 `提交成功` 或 `已加入队列`。
 
 3. 下载失败（`download_failed`）
 - 检查图片 URL 是否可公开访问，必要时延长 `timeouts.downloadMs`。
