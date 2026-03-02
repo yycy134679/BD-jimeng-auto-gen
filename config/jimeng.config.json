@@ -1,0 +1,58 @@
+{
+  "baseUrl": "https://jimeng.jianying.com/ai-tool/generate?type=video",
+  "headless": false,
+  "selectors": {
+    "fileInput": [
+      "input[type='file']",
+      "input[type='file'][multiple]"
+    ],
+    "promptTextarea": [
+      "textarea[placeholder*='视频创意无限可能']",
+      "textarea"
+    ],
+    "promptContentEditable": [
+      "[contenteditable='true']"
+    ],
+    "submitButton": [
+      "button[class*='submit-button-']",
+      "button[class*='submit-button']",
+      "button:has-text('生成')",
+      "button:has-text('立即生成')"
+    ],
+    "successToastTexts": [
+      "提交成功",
+      "已加入队列",
+      "排队加速中"
+    ],
+    "policyViolationTexts": [
+      "不符合平台规则",
+      "违规",
+      "请修改后重试"
+    ]
+  },
+  "fixedOptions": {
+    "model": "Seedance 2.0",
+    "referenceMode": "全能参考",
+    "ratio": "9:16",
+    "resolution": "720P",
+    "duration": "15s"
+  },
+  "timeouts": {
+    "navigationMs": 45000,
+    "actionMs": 15000,
+    "toastMs": 30000,
+    "downloadMs": 30000
+  },
+  "throttleMs": {
+    "min": 1500,
+    "max": 3000
+  },
+  "runtime": {
+    "rootDir": ".runtime",
+    "profileDir": ".runtime/profile",
+    "imagesDir": ".runtime/images",
+    "logsDir": ".runtime/logs",
+    "screenshotsDir": ".runtime/screenshots",
+    "stateDir": ".runtime/state"
+  }
+}

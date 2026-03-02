@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock Jimeng</title>
+    <style>
+      #toast { display: none; color: green; margin-top: 16px; }
+    </style>
+  </head>
+  <body>
+    <button>Seedance 2.0</button>
+    <button>全能参考</button>
+    <button>9:16</button>
+    <button>15s</button>
+
+    <input id="file" type="file" />
+    <textarea id="prompt"></textarea>
+    <button id="submit">生成</button>
+    <div id="toast">已加入队列</div>
+
+    <script>
+      const submit = document.getElementById('submit');
+      const toast = document.getElementById('toast');
+      submit.addEventListener('click', () => {
+        const hasFile = document.getElementById('file').files.length > 0;
+        const hasPrompt = document.getElementById('prompt').value.trim().length > 0;
+        if (hasFile && hasPrompt) {
+          toast.style.display = 'block';
+          document.body.append(' 已加入队列');
+        }
+      });
+    </script>
+  </body>
+</html>
