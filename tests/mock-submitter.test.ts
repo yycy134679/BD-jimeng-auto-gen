@@ -51,6 +51,7 @@ describe("JimengSubmitter (mock page)", () => {
           rateLimitCooldownMsMax: 500,
           batchPauseEveryTasks: 10,
           batchPauseMs: 120_000,
+          batchRefreshEveryTasks: 10,
         },
         runtime: {
           rootDir: screenshotDir,

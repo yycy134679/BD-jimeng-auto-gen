@@ -123,6 +123,8 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
   }
 
   const config = await loadConfig(options.configPath);
+  const configuredBatchRefreshEveryTasks = Math.max(0, Math.floor(config.throttleMs.batchRefreshEveryTasks));
+  const batchRefreshEveryTasks = options.manualOptions ? 0 : configuredBatchRefreshEveryTasks;
   const rateLimitCooldownMsMin = Math.max(0, Math.floor(config.throttleMs.rateLimitCooldownMsMin));
   const rateLimitCooldownMsMax = Math.max(
     rateLimitCooldownMsMin,
@@ -146,6 +148,8 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
       reloadEachTask: options.reloadEachTask,
       manualOptions: options.manualOptions,
       throttleMs: config.throttleMs,
+      configuredBatchRefreshEveryTasks,
+      batchRefreshEveryTasks,
       rateLimitCooldownMsMin,
       rateLimitCooldownMsMax,
       batchPauseEveryTasks,
@@ -153,6 +157,12 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
     },
     "开始批量提交任务",
   );
+  if (options.manualOptions && configuredBatchRefreshEveryTasks > 0) {
+    logger.warn(
+      { configuredBatchRefreshEveryTasks },
+      "manual-options 模式下已自动禁用 batchRefreshEveryTasks，避免刷新后丢失手动参数",
+    );
+  }
 
   const { validTasks, invalidTasks } = await readInputTasks(options.input, options.sheet);
   const duplicateTaskKeys = new Map<string, number>();
@@ -339,6 +349,8 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
       if (!hasMoreTasks) {
         continue;
       }
+      const shouldBatchRefresh =
+        batchRefreshEveryTasks > 0 && processedSubmittableTasks % batchRefreshEveryTasks === 0;
 
       if (
         batchPauseEveryTasks > 0 &&
@@ -353,6 +365,22 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
           "达到批次阈值，开始冷却等待",
         );
         await sleep(batchPauseMs);
+        if (shouldBatchRefresh) {
+          logger.info({ processedSubmittableTasks, baseUrl: config.baseUrl }, "批次冷却后刷新页面");
+          await session.page.goto(config.baseUrl, {
+            waitUntil: "domcontentloaded",
+            timeout: config.timeouts.navigationMs,
+          });
+        }
+        continue;
+      }
+
+      if (shouldBatchRefresh) {
+        logger.info({ processedSubmittableTasks, baseUrl: config.baseUrl }, "达到刷新阈值，刷新页面");
+        await session.page.goto(config.baseUrl, {
+          waitUntil: "domcontentloaded",
+          timeout: config.timeouts.navigationMs,
+        });
         continue;
       }
 

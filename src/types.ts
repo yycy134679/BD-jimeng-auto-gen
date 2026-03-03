@@ -88,6 +88,7 @@ export interface JimengConfig {
     rateLimitCooldownMsMax: number;
     batchPauseEveryTasks: number;
     batchPauseMs: number;
+    batchRefreshEveryTasks: number;
   };
   runtime: RuntimeDirs;
 }

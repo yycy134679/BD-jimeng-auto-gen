@@ -80,7 +80,9 @@
     // 每处理 N 条任务后触发一次长冷却（成功/失败都计数）
     "batchPauseEveryTasks": 10,
     // 长冷却时长（毫秒）
-    "batchPauseMs": 120000
+    "batchPauseMs": 120000,
+    // 每处理 N 条任务后自动刷新一次页面（默认配合批次冷却一起触发）
+    "batchRefreshEveryTasks": 10
   },
   "runtime": {
     // 运行时根目录（建议保持默认）

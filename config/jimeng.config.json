@@ -55,7 +55,8 @@
     "rateLimitCooldownMsMin": 180000,
     "rateLimitCooldownMsMax": 240000,
     "batchPauseEveryTasks": 10,
-    "batchPauseMs": 120000
+    "batchPauseMs": 120000,
+    "batchRefreshEveryTasks": 10
   },
   "runtime": {
     "rootDir": ".runtime",

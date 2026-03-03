@@ -41,6 +41,7 @@ const DEFAULT_CONFIG: JimengConfig = {
     rateLimitCooldownMsMax: 240_000,
     batchPauseEveryTasks: 10,
     batchPauseMs: 120_000,
+    batchRefreshEveryTasks: 10,
   },
   runtime: {
     rootDir: ".runtime",

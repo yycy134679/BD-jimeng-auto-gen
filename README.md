@@ -46,6 +46,7 @@ npx playwright install chromium
   - `submitMinIntervalMs`: 两次“点击提交”之间的最小间隔（毫秒，默认 25000）
   - `rateLimitCooldownMsMin/rateLimitCooldownMsMax`: 命中频控后重试前冷却区间（毫秒，默认 180000-240000）
   - `batchPauseEveryTasks/batchPauseMs`: 每处理 N 条任务（无论成功失败）后的长等待（毫秒），默认每 10 条等待 120000ms（2 分钟）
+  - `batchRefreshEveryTasks`: 每处理 N 条任务后自动刷新页面（默认 10；`--manual-options` 模式下自动禁用）
 
 ## 输入文件格式
 
