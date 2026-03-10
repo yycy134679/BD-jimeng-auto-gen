@@ -22,6 +22,26 @@ interface SubmitterOptions {
   applyFixedOptions: boolean;
 }
 
+export interface GeneratingQueueStatus {
+  completedCount: number;
+  activeCount: number;
+  rawText: string;
+}
+
+export function parseGeneratingQueueIndicatorText(text: string): GeneratingQueueStatus | undefined {
+  const normalized = text.replace(/\s+/g, "");
+  const match = normalized.match(/(?:^|[^\d])(\d+)\/(\d+)生成中/);
+  if (!match) {
+    return undefined;
+  }
+
+  return {
+    completedCount: Number(match[1]),
+    activeCount: Number(match[2]),
+    rawText: text,
+  };
+}
+
 export class JimengSubmitter {
   private readonly page: Page;
 
@@ -66,6 +86,53 @@ export class JimengSubmitter {
         metadata,
       );
     }
+  }
+
+  public async readGeneratingQueueStatus(): Promise<GeneratingQueueStatus> {
+    await this.page.waitForTimeout(600);
+    await this.nudgePageForQueueIndicator();
+
+    const candidateTexts = await this.page.evaluate(() => {
+      const selectors = [
+        "[data-task-indicator='true']",
+        "[data-task-indicator-container='true']",
+      ];
+      const texts = new Set<string>();
+
+      for (const selector of selectors) {
+        for (const node of Array.from(document.querySelectorAll(selector))) {
+          const text = (node.textContent ?? "").replace(/\s+/g, " ").trim();
+          if (text) {
+            texts.add(text);
+          }
+        }
+      }
+
+      return Array.from(texts);
+    });
+
+    for (const text of candidateTexts) {
+      const parsed = parseGeneratingQueueIndicatorText(text);
+      if (parsed) {
+        return parsed;
+      }
+    }
+
+    const bodyText = await this.page.evaluate(() => (document.body.innerText ?? "").replace(/\s+/g, " ").trim());
+    if (!bodyText.includes("生成中")) {
+      return {
+        completedCount: 0,
+        activeCount: 0,
+        rawText: "",
+      };
+    }
+
+    const metadata = await this.captureArtifacts("queue-monitor", "queue-indicator-missing");
+    throw new SubmitWorkflowError(
+      "ui_selector_failed",
+      "页面存在“生成中”文案，但未能识别任务计数指示器，请检查页面结构是否变更",
+      metadata,
+    );
   }
 
   public async submitTask(task: NormalizedInputTask, localImagePath: string): Promise<void> {
@@ -116,6 +183,12 @@ export class JimengSubmitter {
       waitUntil: "domcontentloaded",
       timeout: this.config.timeouts.navigationMs,
     });
+  }
+
+  private async nudgePageForQueueIndicator(): Promise<void> {
+    await this.page.mouse.move(960, 420).catch(() => undefined);
+    await this.page.mouse.wheel(0, -320).catch(() => undefined);
+    await this.page.waitForTimeout(200);
   }
 
   private async findFileInput(): Promise<Locator | undefined> {

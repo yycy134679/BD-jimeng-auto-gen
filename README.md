@@ -7,6 +7,7 @@
 - 支持 `CSV/XLSX` 输入（必填 `image_url` + `prompt`，可选 `task_id`/`pid`）
 - 图片 URL 自动下载后上传
 - Playwright 可视化串行提交
+- 24 小时巡检补单：每隔一小时检查“生成中”数量，不足时自动补到目标值
 - 成功判定：页面出现 `提交成功` 或 `已加入队列`
 - 违规判定：命中违规文案后当前任务立即跳过（不重试），继续下一条
 - 断点续跑（`--resume` 跳过历史已提交）
@@ -114,7 +115,34 @@ npm run submit -- --input ./data/tasks.csv --resume --max-retries 2 --manual-opt
 - `--manual-options` 会在开始前暂停，等你在浏览器里设置好参数后按回车继续
 - `--manual-options` 不能与 `--reload-each-task` 同时使用
 
-### 3) 查看报告
+### 3) 24 小时巡检补单
+
+默认每 60 分钟巡检一次，目标是让“生成中”保持在 10 条；如果当前不足，就会从输入文件里继续补提，且自动跳过历史已提交任务。
+
+```bash
+npm run monitor -- --input ./data/tasks.csv
+```
+
+常用参数：
+
+- `--target-running <N>`: 目标“生成中”数量（默认 10）
+- `--interval-minutes <N>`: 巡检间隔分钟数（默认 60）
+- `--duration-hours <N>`: 总运行时长小时数（默认 24）
+- `--max-retries <N>`: 单条补单失败时的重试次数（默认 2）
+- `--reload-each-task`: 每条补单任务前刷新页面（默认关闭）
+
+示例：
+
+```bash
+npm run monitor -- --input ./data/tasks.csv --target-running 10 --interval-minutes 60 --duration-hours 24
+```
+
+说明：
+- 巡检时会读取页面里的 `x/y 生成中...` 指示器，并用右侧的 `y` 作为当前生成中的任务数
+- `monitor` 模式固定使用自动参数，不支持 `--manual-options`
+- 如需更换模型/比例/时长，请直接修改 `config/jimeng.config.jsonc` 里的 `fixedOptions`
+
+### 4) 查看报告
 
 ```bash
 npm run report -- --run-id latest

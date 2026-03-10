@@ -122,6 +122,11 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
     throw new Error("--manual-options 与 --reload-each-task 不能同时使用");
   }
 
+  const successfulSubmitLimit =
+    typeof options.successfulSubmitLimit === "number"
+      ? Math.max(0, Math.floor(options.successfulSubmitLimit))
+      : undefined;
+
   const config = await loadConfig(options.configPath);
   const configuredBatchRefreshEveryTasks = Math.max(0, Math.floor(config.throttleMs.batchRefreshEveryTasks));
   const batchRefreshEveryTasks = options.manualOptions ? 0 : configuredBatchRefreshEveryTasks;
@@ -154,6 +159,7 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
       rateLimitCooldownMsMax,
       batchPauseEveryTasks,
       batchPauseMs,
+      successfulSubmitLimit,
     },
     "开始批量提交任务",
   );
@@ -207,6 +213,13 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
   };
   let processedSubmittableTasks = 0;
 
+  if (successfulSubmitLimit === 0) {
+    const summaryPath = path.join(config.runtime.logsDir, `run-${runId}.summary.json`);
+    await fs.outputJson(summaryPath, summary, { spaces: 2 });
+    logger.info({ ...summary, summaryPath, successfulSubmitLimit }, "无需补单，批量提交提前结束");
+    return summary;
+  }
+
   const session = await openPersistentSession({
     userDataDir: config.runtime.profileDir,
     baseUrl: config.baseUrl,
@@ -230,7 +243,18 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
       await waitForManualOptionsReady();
     }
 
-    for (const [taskIndex, task] of tasksWithStartAt.entries()) {
+    taskLoop: for (const [taskIndex, task] of tasksWithStartAt.entries()) {
+      if (successfulSubmitLimit !== undefined && summary.success >= successfulSubmitLimit) {
+        logger.info(
+          {
+            successfulSubmitLimit,
+            submitted: summary.success,
+          },
+          "已达到本轮目标提交数，提前结束",
+        );
+        break;
+      }
+
       if (options.resume && stateStore.isAnyAlreadySubmitted(task.resumeKeys)) {
         summary.skipped += 1;
         await stateStore.append(
@@ -345,6 +369,18 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
       }
 
       processedSubmittableTasks += 1;
+      if (successfulSubmitLimit !== undefined && summary.success >= successfulSubmitLimit) {
+        logger.info(
+          {
+            successfulSubmitLimit,
+            submitted: summary.success,
+            processedSubmittableTasks,
+          },
+          "已完成本轮补单目标",
+        );
+        break taskLoop;
+      }
+
       const hasMoreTasks = taskIndex < tasksWithStartAt.length - 1;
       if (!hasMoreTasks) {
         continue;

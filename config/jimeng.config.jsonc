@@ -2,7 +2,7 @@
   // 即梦视频生成页地址（页面改版后这里可能需要更新）
   "baseUrl": "https://jimeng.jianying.com/ai-tool/generate?type=video",
   // 是否使用无头浏览器（true=后台运行；false=可视化窗口）
-  "headless": false,
+  "headless": true,
   "selectors": {
     // 图片上传 input 选择器候选，按顺序尝试匹配
     "fileInput": [

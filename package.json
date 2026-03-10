@@ -8,6 +8,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "login": "tsx src/cli.ts login",
     "submit": "tsx src/cli.ts submit",
+    "monitor": "tsx src/cli.ts monitor",
     "report": "tsx src/cli.ts report",
     "test": "node --test --import tsx \"tests/**/*.test.ts\""
   },

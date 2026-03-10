@@ -102,11 +102,23 @@ export interface SubmitCommandOptions {
   reloadEachTask: boolean;
   manualOptions: boolean;
   configPath: string;
+  successfulSubmitLimit?: number;
 }
 
 export interface ReportOptions {
   runId: string;
   configPath: string;
+}
+
+export interface MonitorCommandOptions {
+  input: string;
+  sheet?: string;
+  maxRetries: number;
+  reloadEachTask: boolean;
+  configPath: string;
+  targetRunning: number;
+  intervalMinutes: number;
+  durationHours: number;
 }
 
 export interface RunSummary {

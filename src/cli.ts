@@ -3,6 +3,7 @@ import { Command } from "commander";
 
 import { runBatchSubmit } from "./run/batch-runner.js";
 import { runLogin } from "./run/login.js";
+import { runQueueMonitor } from "./run/monitor-runner.js";
 import { runReport } from "./run/report.js";
 
 const DEFAULT_CONFIG_PATH = "config/jimeng.config.jsonc";
@@ -81,6 +82,64 @@ program
       configPath: options.config,
     });
   });
+
+program
+  .command("monitor")
+  .description("定时巡检“生成中”数量，不足时自动补单")
+  .requiredOption("--input <path>", "CSV/XLSX 输入文件路径")
+  .option("--sheet <name>", "Excel 工作表名称")
+  .option("--max-retries <number>", "失败后重试次数", (value) => parsePositiveNumber(value, "--max-retries"), 2)
+  .option("--reload-each-task", "每条补单任务前刷新页面（默认关闭）", false)
+  .option(
+    "--target-running <number>",
+    "目标“生成中”数量",
+    (value) => parsePositiveNumber(value, "--target-running"),
+    10,
+  )
+  .option(
+    "--interval-minutes <number>",
+    "巡检间隔（分钟）",
+    (value) => parsePositiveNumber(value, "--interval-minutes"),
+    60,
+  )
+  .option(
+    "--duration-hours <number>",
+    "总运行时长（小时）",
+    (value) => parsePositiveNumber(value, "--duration-hours"),
+    24,
+  )
+  .option("--config <path>", "配置文件路径", DEFAULT_CONFIG_PATH)
+  .action(
+    async (options: {
+      input: string;
+      sheet?: string;
+      maxRetries: number;
+      reloadEachTask: boolean;
+      targetRunning: number;
+      intervalMinutes: number;
+      durationHours: number;
+      config: string;
+    }) => {
+      const summary = await runQueueMonitor({
+        input: options.input,
+        sheet: options.sheet,
+        maxRetries: options.maxRetries,
+        reloadEachTask: options.reloadEachTask,
+        targetRunning: options.targetRunning,
+        intervalMinutes: options.intervalMinutes,
+        durationHours: options.durationHours,
+        configPath: options.config,
+      });
+
+      console.log("\n=== monitor summary ===");
+      console.log(`runId: ${summary.runId}`);
+      console.log(`completedCycles: ${summary.completedCycles}`);
+      console.log(`topUpCycles: ${summary.topUpCycles}`);
+      console.log(`cycleErrors: ${summary.cycleErrors}`);
+      console.log(`totalSubmitted: ${summary.totalSubmitted}`);
+      console.log(`lastObservedRunningCount: ${summary.lastObservedRunningCount}`);
+    },
+  );
 
 program.parseAsync(process.argv).catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
