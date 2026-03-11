@@ -1,7 +1,11 @@
 node_modules/
 dist/
+dist-desktop/
+dist-renderer/
 .runtime/
 *.log
 .DS_Store
 .firecrawl/
 product_data/
+build/icon.iconset/
+build/icon.svg.png

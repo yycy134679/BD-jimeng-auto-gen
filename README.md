@@ -25,6 +25,44 @@ npm install
 npx playwright install chromium
 ```
 
+## 桌面版（macOS）
+
+新增了一个基于 `Electron + React + Vite` 的本地桌面壳，保留原有 Playwright 自动化内核。
+
+常用命令：
+
+```bash
+# 本地开发模式（先编译 Electron 主进程，再启动 Vite + Electron）
+npm run desktop:dev
+
+# 构建桌面端主进程和渲染层
+npm run desktop:build
+
+# 打包 DMG（打包前建议先把 Chromium 浏览器装到项目内）
+npm run desktop:install-browsers
+npm run desktop:dist
+```
+
+打包输出：
+
+- DMG：`dist/Jimeng Desktop-<version>-arm64.dmg`
+- 应用包：`dist/mac-arm64/Jimeng Desktop.app`
+
+打包说明：
+
+- `desktop:install-browsers` 会把 Playwright Chromium 装到项目内的 `playwright-core/.local-browsers`
+- `desktop:dist` 会把这些浏览器资源复制进应用包的 `Contents/Resources/playwright-browsers`
+- 桌面端运行时会优先显式使用包内 Chromium，不依赖同事本机额外安装浏览器
+
+桌面端能力：
+
+- 登录引导：打开脚本专用浏览器并保存登录态
+- Excel/CSV 导入预览：展示有效任务数、无效行和 sheet 选择
+- 批量提交：常用参数直出，高级参数折叠
+- 巡检补单：配置目标生成中数量、巡检间隔和总时长
+- 运行记录：查看最近 run 的摘要、失败原因和进度事件
+- 同事友好提示：内置 CSV 模板下载、首次使用步骤、巡检建议和排障文案
+
 ## 配置
 
 默认配置文件：`config/jimeng.config.jsonc`

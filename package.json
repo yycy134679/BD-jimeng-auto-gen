@@ -2,15 +2,49 @@
   "name": "jimeng-auto-gen",
   "version": "0.1.0",
   "private": true,
+  "description": "Jimeng macOS desktop app for batch submit and queue monitoring.",
+  "author": "OpenAI Codex",
   "type": "module",
+  "main": "dist-desktop/desktop/main/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.desktop.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "login": "tsx src/cli.ts login",
     "submit": "tsx src/cli.ts submit",
     "monitor": "tsx src/cli.ts monitor",
     "report": "tsx src/cli.ts report",
-    "test": "node --test --import tsx \"tests/**/*.test.ts\""
+    "test": "node --test --import tsx \"tests/**/*.test.ts\"",
+    "desktop:build:main": "tsc -p tsconfig.desktop.json",
+    "desktop:build:renderer": "vite build --config vite.desktop.config.ts",
+    "desktop:build": "npm run desktop:build:main && npm run desktop:build:renderer",
+    "desktop:dev": "node scripts/dev-desktop.mjs",
+    "desktop:install-browsers": "PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium",
+    "desktop:dist": "npm run desktop:build && electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "com.bytedance.jimeng-desktop",
+    "productName": "Jimeng Desktop",
+    "directories": {
+      "buildResources": "build"
+    },
+    "files": [
+      "dist-desktop/**/*",
+      "dist-renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/playwright-core/.local-browsers",
+        "to": "playwright-browsers"
+      }
+    ],
+    "mac": {
+      "icon": "build/icon.icns",
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity"
+    }
   },
   "dependencies": {
     "axios": "^1.8.4",
@@ -19,13 +53,21 @@
     "fs-extra": "^11.3.0",
     "pino": "^9.7.0",
     "playwright": "^1.52.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "xlsx": "^0.18.5",
     "zod": "^4.1.5"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^24.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "electron": "^41.0.0",
+    "electron-builder": "^26.8.1",
     "tsx": "^4.20.0",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "vite": "^7.3.1"
   }
 }

@@ -8,20 +8,11 @@ import { ensureRuntimeDirs, loadConfig } from "../config.js";
 import { downloadImage } from "../download/image-downloader.js";
 import { readInputTasks } from "../input/reader.js";
 import { JimengSubmitter } from "../jimeng/submitter.js";
+import { buildStateRecord, createRunId, emitProgress, type ProgressReporter } from "../services/run-support.js";
 import { StateStore } from "../state/store.js";
-import type { StateRecord, SubmitCommandOptions, SubmitResult, TaskStatus } from "../types.js";
+import type { SubmitCommandOptions, SubmitResult } from "../types.js";
 import { SubmitWorkflowError } from "../types.js";
 import { randomBetween, sleep } from "../utils/sleep.js";
-
-function createRunId(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-  const second = String(date.getSeconds()).padStart(2, "0");
-  return `${year}${month}${day}-${hour}${minute}${second}`;
-}
 
 function createLogger(logsDir: string, runId: string): Logger {
   const logPath = path.join(logsDir, `run-${runId}.log`);
@@ -71,34 +62,6 @@ function normalizeError(error: unknown): SubmitResult {
   };
 }
 
-function buildStateRecord(input: {
-  runId: string;
-  taskKey: string;
-  status: TaskStatus;
-  attempt: number;
-  inputRow: number;
-  sourceFile: string;
-  lastError?: string;
-  screenshotPath?: string;
-  htmlPath?: string;
-}): StateRecord {
-  const now = new Date().toISOString();
-
-  return {
-    runId: input.runId,
-    taskKey: input.taskKey,
-    status: input.status,
-    attempt: input.attempt,
-    inputRow: input.inputRow,
-    sourceFile: input.sourceFile,
-    submittedAt: input.status === "submitted" ? now : undefined,
-    lastError: input.lastError,
-    screenshotPath: input.screenshotPath,
-    htmlPath: input.htmlPath,
-    createdAt: now,
-  };
-}
-
 function summarizePrompt(prompt: string, maxLength = 48): string {
   const compact = prompt.replace(/\s+/g, " ").trim();
   if (compact.length <= maxLength) {
@@ -117,7 +80,17 @@ export interface SubmitRunSummary {
   invalid: number;
 }
 
-export async function runBatchSubmit(options: SubmitCommandOptions): Promise<SubmitRunSummary> {
+export interface SubmitRunHooks {
+  mode?: "submit" | "monitor";
+  onProgress?: ProgressReporter;
+  runIdOverride?: string;
+  waitForManualOptionsReady?: () => Promise<void>;
+}
+
+export async function runBatchSubmit(
+  options: SubmitCommandOptions,
+  hooks: SubmitRunHooks = {},
+): Promise<SubmitRunSummary> {
   if (options.manualOptions && options.reloadEachTask) {
     throw new Error("--manual-options 与 --reload-each-task 不能同时使用");
   }
@@ -142,7 +115,8 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
   const stateStore = new StateStore(config.runtime.stateDir);
   await stateStore.init();
 
-  const runId = createRunId();
+  const runId = hooks.runIdOverride ?? createRunId();
+  const mode = hooks.mode ?? "submit";
   await stateStore.setLatestRunId(runId);
 
   const logger = createLogger(config.runtime.logsDir, runId);
@@ -169,6 +143,14 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
       "manual-options 模式下已自动禁用 batchRefreshEveryTasks，避免刷新后丢失手动参数",
     );
   }
+
+  await emitProgress(hooks.onProgress, {
+    runId,
+    mode,
+    phase: "prepare",
+    level: "info",
+    message: "开始批量提交任务",
+  });
 
   const { validTasks, invalidTasks } = await readInputTasks(options.input, options.sheet);
   const duplicateTaskKeys = new Map<string, number>();
@@ -213,10 +195,39 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
   };
   let processedSubmittableTasks = 0;
 
+  if (invalidTasks.length > 0) {
+    await emitProgress(hooks.onProgress, {
+      runId,
+      mode,
+      phase: "import",
+      level: "warn",
+      message: `输入文件存在 ${invalidTasks.length} 条无效记录`,
+      stats: {
+        total: summary.total,
+        invalid: summary.invalid,
+        failed: summary.failed,
+      },
+    });
+  }
+
   if (successfulSubmitLimit === 0) {
     const summaryPath = path.join(config.runtime.logsDir, `run-${runId}.summary.json`);
     await fs.outputJson(summaryPath, summary, { spaces: 2 });
     logger.info({ ...summary, summaryPath, successfulSubmitLimit }, "无需补单，批量提交提前结束");
+    await emitProgress(hooks.onProgress, {
+      runId,
+      mode,
+      phase: "summary",
+      level: "info",
+      message: "无需补单，本轮提前结束",
+      stats: {
+        total: summary.total,
+        success: summary.success,
+        failed: summary.failed,
+        skipped: summary.skipped,
+        invalid: summary.invalid,
+      },
+    });
     return summary;
   }
 
@@ -240,6 +251,7 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
 
     await submitter.preflight();
     if (options.manualOptions) {
+      const waitForManualOptionsReady = hooks.waitForManualOptionsReady ?? defaultWaitForManualOptionsReady;
       await waitForManualOptionsReady();
     }
 
@@ -269,6 +281,23 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
           }),
         );
         logger.info({ taskKey: task.taskKey, inputRow: task.inputRow }, "跳过已提交任务");
+        await emitProgress(hooks.onProgress, {
+          runId,
+          mode,
+          phase: "task",
+          level: "info",
+          message: "任务已在历史记录中提交，已跳过",
+          current: taskIndex + 1,
+          total: tasksWithStartAt.length,
+          taskKey: task.taskKey,
+          stats: {
+            total: summary.total,
+            success: summary.success,
+            failed: summary.failed,
+            skipped: summary.skipped,
+            invalid: summary.invalid,
+          },
+        });
         continue;
       }
 
@@ -282,6 +311,23 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
         },
         "开始处理任务",
       );
+      await emitProgress(hooks.onProgress, {
+        runId,
+        mode,
+        phase: "task",
+        level: "info",
+        message: `开始处理任务 ${taskIndex + 1}/${tasksWithStartAt.length}`,
+        current: taskIndex + 1,
+        total: tasksWithStartAt.length,
+        taskKey: task.taskKey,
+        stats: {
+          total: summary.total,
+          success: summary.success,
+          failed: summary.failed,
+          skipped: summary.skipped,
+          invalid: summary.invalid,
+        },
+      });
 
       const maxAttempts = options.maxRetries + 1;
 
@@ -315,6 +361,23 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
 
           summary.success += 1;
           logger.info({ taskKey: task.taskKey, attempt }, "任务提交成功");
+          await emitProgress(hooks.onProgress, {
+            runId,
+            mode,
+            phase: "task",
+            level: "info",
+            message: "任务提交成功",
+            current: taskIndex + 1,
+            total: tasksWithStartAt.length,
+            taskKey: task.taskKey,
+            stats: {
+              total: summary.total,
+              success: summary.success,
+              failed: summary.failed,
+              skipped: summary.skipped,
+              invalid: summary.invalid,
+            },
+          });
           break;
         } catch (error) {
           const normalized = normalizeError(error);
@@ -335,6 +398,23 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
               ? "命中不可重试状态（违规或结果不确定），当前任务不重试并跳过"
               : "任务提交失败",
           );
+          await emitProgress(hooks.onProgress, {
+            runId,
+            mode,
+            phase: "task",
+            level: isLastAttempt ? "error" : "warn",
+            message: normalized.error ?? "任务提交失败",
+            current: taskIndex + 1,
+            total: tasksWithStartAt.length,
+            taskKey: task.taskKey,
+            stats: {
+              total: summary.total,
+              success: summary.success,
+              failed: summary.failed + (isLastAttempt ? 1 : 0),
+              skipped: summary.skipped,
+              invalid: summary.invalid,
+            },
+          });
 
           if (isLastAttempt) {
             await stateStore.append(
@@ -360,6 +440,16 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
               { taskKey: task.taskKey, attempt, cooldownMs },
               "命中平台频控，冷却后重试当前任务",
             );
+            await emitProgress(hooks.onProgress, {
+              runId,
+              mode,
+              phase: "task",
+              level: "warn",
+              message: `命中平台频控，冷却 ${(cooldownMs / 1000).toFixed(0)} 秒后重试`,
+              current: taskIndex + 1,
+              total: tasksWithStartAt.length,
+              taskKey: task.taskKey,
+            });
             await sleep(cooldownMs);
             continue;
           }
@@ -378,6 +468,20 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
           },
           "已完成本轮补单目标",
         );
+        await emitProgress(hooks.onProgress, {
+          runId,
+          mode,
+          phase: "summary",
+          level: "info",
+          message: "已完成本轮补单目标",
+          stats: {
+            total: summary.total,
+            success: summary.success,
+            failed: summary.failed,
+            skipped: summary.skipped,
+            invalid: summary.invalid,
+          },
+        });
         break taskLoop;
       }
 
@@ -400,6 +504,20 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
           },
           "达到批次阈值，开始冷却等待",
         );
+        await emitProgress(hooks.onProgress, {
+          runId,
+          mode,
+          phase: "task",
+          level: "info",
+          message: `达到批次阈值，等待 ${(batchPauseMs / 1000).toFixed(0)} 秒`,
+          stats: {
+            total: summary.total,
+            success: summary.success,
+            failed: summary.failed,
+            skipped: summary.skipped,
+            invalid: summary.invalid,
+          },
+        });
         await sleep(batchPauseMs);
         if (shouldBatchRefresh) {
           logger.info({ processedSubmittableTasks, baseUrl: config.baseUrl }, "批次冷却后刷新页面");
@@ -413,6 +531,13 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
 
       if (shouldBatchRefresh) {
         logger.info({ processedSubmittableTasks, baseUrl: config.baseUrl }, "达到刷新阈值，刷新页面");
+        await emitProgress(hooks.onProgress, {
+          runId,
+          mode,
+          phase: "task",
+          level: "info",
+          message: "达到刷新阈值，准备刷新页面",
+        });
         await session.page.goto(config.baseUrl, {
           waitUntil: "domcontentloaded",
           timeout: config.timeouts.navigationMs,
@@ -431,10 +556,24 @@ export async function runBatchSubmit(options: SubmitCommandOptions): Promise<Sub
   await fs.outputJson(summaryPath, summary, { spaces: 2 });
 
   logger.info({ ...summary, summaryPath }, "批量提交结束");
+  await emitProgress(hooks.onProgress, {
+    runId,
+    mode,
+    phase: "summary",
+    level: "info",
+    message: "批量提交结束",
+    stats: {
+      total: summary.total,
+      success: summary.success,
+      failed: summary.failed,
+      skipped: summary.skipped,
+      invalid: summary.invalid,
+    },
+  });
   return summary;
 }
 
-function waitForManualOptionsReady(): Promise<void> {
+function defaultWaitForManualOptionsReady(): Promise<void> {
   return new Promise((resolve) => {
     const rl = readline.createInterface({
       input: process.stdin,

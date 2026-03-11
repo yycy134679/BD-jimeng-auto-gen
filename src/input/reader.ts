@@ -11,6 +11,21 @@ const PROMPT_HEADERS = ["prompt", "提示词", "文案"];
 const TASK_ID_HEADERS = ["task_id", "taskid", "id"];
 const PID_HEADERS = ["pid", "商品id", "product_id"];
 
+export interface InputFileMetadata {
+  absoluteInputPath: string;
+  fileName: string;
+  extension: string;
+  sheetNames: string[];
+  defaultSheet?: string;
+}
+
+export interface ReadInputPreviewResult extends ReadInputResult {
+  fileName: string;
+  absoluteInputPath: string;
+  selectedSheet?: string;
+  sheetNames: string[];
+}
+
 function normalizeHeader(header: string): string {
   return header.replace(/^\ufeff/, "").trim().toLowerCase().replace(/\s+/g, "");
 }
@@ -68,28 +83,82 @@ function parseXlsx(filePath: string, sheetName?: string): Record<string, unknown
   });
 }
 
+function resolveInputMetadata(inputPath: string): InputFileMetadata {
+  const absoluteInputPath = path.resolve(inputPath);
+  const extension = path.extname(absoluteInputPath).toLowerCase();
+  const fileName = path.basename(absoluteInputPath);
+
+  if (extension === ".xlsx" || extension === ".xls") {
+    const workbook = XLSX.readFile(absoluteInputPath, { raw: false });
+    return {
+      absoluteInputPath,
+      fileName,
+      extension,
+      sheetNames: workbook.SheetNames,
+      defaultSheet: workbook.SheetNames[0],
+    };
+  }
+
+  return {
+    absoluteInputPath,
+    fileName,
+    extension,
+    sheetNames: [],
+  };
+}
+
+function loadRows(metadata: InputFileMetadata, sheetName?: string): {
+  rows: Record<string, unknown>[];
+  selectedSheet?: string;
+} {
+  if (metadata.extension === ".csv") {
+    const csvContent = fs.readFileSync(metadata.absoluteInputPath, "utf8");
+    return {
+      rows: parseCsv(csvContent),
+    };
+  }
+
+  if (metadata.extension === ".xlsx" || metadata.extension === ".xls") {
+    const selectedSheet = sheetName ?? metadata.defaultSheet;
+    return {
+      rows: parseXlsx(metadata.absoluteInputPath, selectedSheet),
+      selectedSheet,
+    };
+  }
+
+  throw new Error(`不支持的输入文件格式: ${metadata.extension || "unknown"}`);
+}
+
+export async function inspectInputFile(inputPath: string): Promise<InputFileMetadata> {
+  return resolveInputMetadata(inputPath);
+}
+
+export async function readInputPreview(
+  inputPath: string,
+  sheetName?: string,
+): Promise<ReadInputPreviewResult> {
+  const metadata = resolveInputMetadata(inputPath);
+  const { rows, selectedSheet } = loadRows(metadata, sheetName);
+  const drafts = mapRowsToDrafts(rows, metadata.absoluteInputPath);
+  const { valid, invalid } = validateDraftInputs(drafts);
+
+  return {
+    fileName: metadata.fileName,
+    absoluteInputPath: metadata.absoluteInputPath,
+    selectedSheet,
+    sheetNames: metadata.sheetNames,
+    validTasks: valid,
+    invalidTasks: invalid,
+  };
+}
+
 export async function readInputTasks(
   inputPath: string,
   sheetName?: string,
 ): Promise<ReadInputResult> {
-  const absoluteInputPath = path.resolve(inputPath);
-  const extension = path.extname(absoluteInputPath).toLowerCase();
-
-  let rows: Record<string, unknown>[];
-  if (extension === ".csv") {
-    const csvContent = await fs.readFile(absoluteInputPath, "utf8");
-    rows = parseCsv(csvContent);
-  } else if (extension === ".xlsx" || extension === ".xls") {
-    rows = parseXlsx(absoluteInputPath, sheetName);
-  } else {
-    throw new Error(`不支持的输入文件格式: ${extension || "unknown"}`);
-  }
-
-  const drafts = mapRowsToDrafts(rows, absoluteInputPath);
-  const { valid, invalid } = validateDraftInputs(drafts);
-
+  const preview = await readInputPreview(inputPath, sheetName);
   return {
-    validTasks: valid,
-    invalidTasks: invalid,
+    validTasks: preview.validTasks,
+    invalidTasks: preview.invalidTasks,
   };
 }

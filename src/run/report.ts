@@ -1,38 +1,7 @@
 import { ensureRuntimeDirs, loadConfig } from "../config.js";
 import { StateStore } from "../state/store.js";
-import type { ReportOptions, RunSummary, StateRecord } from "../types.js";
-
-function summarize(records: StateRecord[], runId: string): RunSummary {
-  const byStatus: Record<string, number> = {};
-  const failureReasons: Record<string, number> = {};
-
-  for (const record of records) {
-    byStatus[record.status] = (byStatus[record.status] ?? 0) + 1;
-
-    const isFailure =
-      record.status !== "submitted" &&
-      record.status !== "skipped_submitted";
-
-    if (isFailure) {
-      const reason = record.lastError?.trim() || "unknown_error";
-      failureReasons[reason] = (failureReasons[reason] ?? 0) + 1;
-    }
-  }
-
-  const success = byStatus.submitted ?? 0;
-  const skipped = byStatus.skipped_submitted ?? 0;
-  const failed = records.length - success - skipped;
-
-  return {
-    runId,
-    total: records.length,
-    success,
-    failed,
-    skipped,
-    byStatus,
-    failureReasons,
-  };
-}
+import type { ReportOptions, RunSummary } from "../types.js";
+import { summarizeRunRecords } from "../services/run-support.js";
 
 function printSummary(summary: RunSummary): void {
   console.log(`runId: ${summary.runId}`);
@@ -75,7 +44,7 @@ export async function runReport(options: ReportOptions): Promise<RunSummary> {
     throw new Error(`runId=${runId} 没有记录`);
   }
 
-  const summary = summarize(records, runId);
+  const summary = summarizeRunRecords(records, runId);
   printSummary(summary);
   return summary;
 }

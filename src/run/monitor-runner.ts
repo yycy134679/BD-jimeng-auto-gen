@@ -5,19 +5,10 @@ import pino, { type Logger } from "pino";
 import { openPersistentSession } from "../browser/session.js";
 import { ensureRuntimeDirs, loadConfig } from "../config.js";
 import { JimengSubmitter } from "../jimeng/submitter.js";
-import type { MonitorCommandOptions } from "../types.js";
+import { createRunId, emitProgress, type ProgressReporter } from "../services/run-support.js";
+import type { MonitorCommandOptions, MonitorRunSummary } from "../types.js";
 import { runBatchSubmit } from "./batch-runner.js";
 import { sleep } from "../utils/sleep.js";
-
-function createRunId(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-  const second = String(date.getSeconds()).padStart(2, "0");
-  return `${year}${month}${day}-${hour}${minute}${second}`;
-}
 
 function createLogger(logsDir: string, runId: string): Logger {
   const logPath = path.join(logsDir, `monitor-${runId}.log`);
@@ -42,20 +33,9 @@ function normalizePositiveInteger(value: number, fallback: number): number {
   return Math.max(1, Math.floor(value));
 }
 
-export interface MonitorRunSummary {
-  runId: string;
-  targetRunning: number;
-  intervalMinutes: number;
-  durationHours: number;
-  startedAt: string;
-  deadlineAt: string;
-  completedAt: string;
-  completedCycles: number;
-  topUpCycles: number;
-  cycleErrors: number;
-  totalSubmitted: number;
-  totalFailed: number;
-  lastObservedRunningCount: number;
+export interface MonitorRunHooks {
+  onProgress?: ProgressReporter;
+  runIdOverride?: string;
 }
 
 async function inspectRunningCount(
@@ -89,7 +69,10 @@ async function inspectRunningCount(
   }
 }
 
-export async function runQueueMonitor(options: MonitorCommandOptions): Promise<MonitorRunSummary> {
+export async function runQueueMonitor(
+  options: MonitorCommandOptions,
+  hooks: MonitorRunHooks = {},
+): Promise<MonitorRunSummary> {
   const targetRunning = normalizePositiveInteger(options.targetRunning, 10);
   const intervalMinutes = normalizePositiveInteger(options.intervalMinutes, 60);
   const durationHours = normalizePositiveInteger(options.durationHours, 24);
@@ -99,7 +82,7 @@ export async function runQueueMonitor(options: MonitorCommandOptions): Promise<M
   const config = await loadConfig(options.configPath);
   await ensureRuntimeDirs(config.runtime);
 
-  const runId = createRunId();
+  const runId = hooks.runIdOverride ?? createRunId();
   const logger = createLogger(config.runtime.logsDir, runId);
   const startedAt = new Date();
   const deadlineAt = new Date(startedAt.getTime() + durationMs);
@@ -133,12 +116,27 @@ export async function runQueueMonitor(options: MonitorCommandOptions): Promise<M
     },
     "开始巡检补单任务",
   );
+  await emitProgress(hooks.onProgress, {
+    runId,
+    mode: "monitor",
+    phase: "prepare",
+    level: "info",
+    message: "开始巡检补单任务",
+  });
 
   let cycle = 0;
   while (Date.now() < deadlineAt.getTime()) {
     cycle += 1;
     const cycleStartedAt = Date.now();
     logger.info({ cycle }, "开始新一轮巡检");
+    await emitProgress(hooks.onProgress, {
+      runId,
+      mode: "monitor",
+      phase: "cycle",
+      level: "info",
+      message: `开始第 ${cycle} 轮巡检`,
+      current: cycle,
+    });
 
     try {
       const queueStatus = await inspectRunningCount(options.configPath, logger, runId);
@@ -156,9 +154,37 @@ export async function runQueueMonitor(options: MonitorCommandOptions): Promise<M
         },
         "读取生成中队列完成",
       );
+      await emitProgress(hooks.onProgress, {
+        runId,
+        mode: "monitor",
+        phase: "cycle",
+        level: "info",
+        message: `当前生成中 ${queueStatus.activeCount} 条，目标 ${targetRunning} 条`,
+        current: cycle,
+        stats: {
+          completedCycles: summary.completedCycles,
+          topUpCycles: summary.topUpCycles,
+          cycleErrors: summary.cycleErrors,
+          totalSubmitted: summary.totalSubmitted,
+          totalFailed: summary.totalFailed,
+          lastObservedRunningCount: summary.lastObservedRunningCount,
+        },
+      });
 
       if (deficit > 0) {
         summary.topUpCycles += 1;
+        await emitProgress(hooks.onProgress, {
+          runId,
+          mode: "monitor",
+          phase: "cycle",
+          level: "warn",
+          message: `生成中数量不足，准备补 ${deficit} 条`,
+          current: cycle,
+          stats: {
+            topUpCycles: summary.topUpCycles,
+            lastObservedRunningCount: summary.lastObservedRunningCount,
+          },
+        });
         const batchSummary = await runBatchSubmit({
           input: options.input,
           sheet: options.sheet,
@@ -168,6 +194,9 @@ export async function runQueueMonitor(options: MonitorCommandOptions): Promise<M
           manualOptions: false,
           configPath: options.configPath,
           successfulSubmitLimit: deficit,
+        }, {
+          mode: "monitor",
+          onProgress: hooks.onProgress,
         });
 
         summary.totalSubmitted += batchSummary.success;
@@ -182,8 +211,40 @@ export async function runQueueMonitor(options: MonitorCommandOptions): Promise<M
           },
           "本轮补单结束",
         );
+        await emitProgress(hooks.onProgress, {
+          runId,
+          mode: "monitor",
+          phase: "cycle",
+          level: "info",
+          message: `本轮补单结束，成功补 ${batchSummary.success} 条`,
+          current: cycle,
+          stats: {
+            completedCycles: summary.completedCycles,
+            topUpCycles: summary.topUpCycles,
+            cycleErrors: summary.cycleErrors,
+            totalSubmitted: summary.totalSubmitted,
+            totalFailed: summary.totalFailed,
+            lastObservedRunningCount: summary.lastObservedRunningCount,
+          },
+        });
       } else {
         logger.info({ cycle, targetRunning }, "当前生成中任务已达目标，无需补单");
+        await emitProgress(hooks.onProgress, {
+          runId,
+          mode: "monitor",
+          phase: "cycle",
+          level: "info",
+          message: "当前生成中任务已达目标，无需补单",
+          current: cycle,
+          stats: {
+            completedCycles: summary.completedCycles,
+            topUpCycles: summary.topUpCycles,
+            cycleErrors: summary.cycleErrors,
+            totalSubmitted: summary.totalSubmitted,
+            totalFailed: summary.totalFailed,
+            lastObservedRunningCount: summary.lastObservedRunningCount,
+          },
+        });
       }
     } catch (error) {
       summary.cycleErrors += 1;
@@ -194,6 +255,22 @@ export async function runQueueMonitor(options: MonitorCommandOptions): Promise<M
         },
         "本轮巡检失败，等待下一轮继续",
       );
+      await emitProgress(hooks.onProgress, {
+        runId,
+        mode: "monitor",
+        phase: "cycle",
+        level: "error",
+        message: error instanceof Error ? error.message : String(error),
+        current: cycle,
+        stats: {
+          completedCycles: summary.completedCycles,
+          topUpCycles: summary.topUpCycles,
+          cycleErrors: summary.cycleErrors,
+          totalSubmitted: summary.totalSubmitted,
+          totalFailed: summary.totalFailed,
+          lastObservedRunningCount: summary.lastObservedRunningCount,
+        },
+      });
     }
 
     summary.completedCycles = cycle;
@@ -207,6 +284,14 @@ export async function runQueueMonitor(options: MonitorCommandOptions): Promise<M
     const sleepMs = Math.max(0, Math.min(nextCycleAt, deadlineAt.getTime()) - now);
     if (sleepMs > 0) {
       logger.info({ cycle, sleepMs, nextCycleAt: new Date(now + sleepMs).toISOString() }, "等待下一轮巡检");
+      await emitProgress(hooks.onProgress, {
+        runId,
+        mode: "monitor",
+        phase: "cycle",
+        level: "info",
+        message: `等待下一轮巡检，约 ${(sleepMs / 60000).toFixed(1)} 分钟后继续`,
+        current: cycle,
+      });
       await sleep(sleepMs);
     }
   }
@@ -216,5 +301,20 @@ export async function runQueueMonitor(options: MonitorCommandOptions): Promise<M
   await fs.outputJson(summaryPath, summary, { spaces: 2 });
 
   logger.info({ ...summary, summaryPath }, "巡检补单任务结束");
+  await emitProgress(hooks.onProgress, {
+    runId,
+    mode: "monitor",
+    phase: "summary",
+    level: "info",
+    message: "巡检补单任务结束",
+    stats: {
+      completedCycles: summary.completedCycles,
+      topUpCycles: summary.topUpCycles,
+      cycleErrors: summary.cycleErrors,
+      totalSubmitted: summary.totalSubmitted,
+      totalFailed: summary.totalFailed,
+      lastObservedRunningCount: summary.lastObservedRunningCount,
+    },
+  });
   return summary;
 }
