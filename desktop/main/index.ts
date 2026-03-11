@@ -42,9 +42,13 @@ function configureBundledBrowserPath(): void {
 }
 
 function getRendererEntry(): { devServerUrl?: string; htmlPath: string } {
+  const htmlPath = app.isPackaged
+    ? path.join(app.getAppPath(), "dist-renderer", "index.html")
+    : path.resolve(__dirname, "../../../dist-renderer/index.html");
+
   return {
     devServerUrl: process.env.JIMENG_DESKTOP_DEV_SERVER_URL,
-    htmlPath: path.resolve(__dirname, "../../../dist-renderer/index.html"),
+    htmlPath,
   };
 }
 

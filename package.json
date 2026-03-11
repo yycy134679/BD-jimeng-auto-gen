@@ -18,8 +18,9 @@
     "desktop:build:renderer": "vite build --config vite.desktop.config.ts",
     "desktop:build": "npm run desktop:build:main && npm run desktop:build:renderer",
     "desktop:dev": "node scripts/dev-desktop.mjs",
-    "desktop:install-browsers": "PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install chromium",
-    "desktop:dist": "npm run desktop:build && electron-builder --mac dmg"
+    "desktop:install-browsers": "PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --force --no-shell chromium",
+    "desktop:prepare-resources": "node scripts/prepare-playwright-resources.mjs",
+    "desktop:dist": "npm run desktop:prepare-resources && npm run desktop:build && electron-builder --mac dmg"
   },
   "build": {
     "appId": "com.bytedance.jimeng-desktop",
@@ -30,11 +31,13 @@
     "files": [
       "dist-desktop/**/*",
       "dist-renderer/**/*",
-      "package.json"
+      "package.json",
+      "!**/node_modules/playwright-core/.local-browsers{,/**/*}",
+      "!**/playwright-core/.local-browsers{,/**/*}"
     ],
     "extraResources": [
       {
-        "from": "node_modules/playwright-core/.local-browsers",
+        "from": "build/playwright-browsers",
         "to": "playwright-browsers"
       }
     ],

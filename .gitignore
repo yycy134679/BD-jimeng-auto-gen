@@ -9,3 +9,4 @@ dist-renderer/
 product_data/
 build/icon.iconset/
 build/icon.svg.png
+build/playwright-browsers/
