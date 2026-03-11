@@ -1,7 +1,12 @@
 import { z } from "zod";
 
 import type { InvalidInputTask } from "../types.js";
-import { buildLegacyTaskKey, buildTaskKey, normalizeOptionalId } from "../utils/hash.js";
+import {
+  buildDuplicateAwareTaskKey,
+  buildLegacyTaskKey,
+  buildTaskKey,
+  normalizeOptionalId,
+} from "../utils/hash.js";
 
 const InputSchema = z.object({
   imageUrl: z
@@ -42,11 +47,21 @@ export interface ValidatedInput {
   sourceFile: string;
 }
 
+interface PreparedValidInput {
+  baseTaskKey: string;
+  legacyTaskKey: string;
+  taskId?: string;
+  imageUrl: string;
+  prompt: string;
+  inputRow: number;
+  sourceFile: string;
+}
+
 export function validateDraftInputs(drafts: DraftInput[]): {
   valid: ValidatedInput[];
   invalid: InvalidInputTask[];
 } {
-  const valid: ValidatedInput[] = [];
+  const preparedValid: PreparedValidInput[] = [];
   const invalid: InvalidInputTask[] = [];
 
   for (const draft of drafts) {
@@ -73,7 +88,7 @@ export function validateDraftInputs(drafts: DraftInput[]): {
     const normalized = parsed.data;
     const taskId = normalizeOptionalId(normalized.taskId);
     const pid = normalizeOptionalId(normalized.pid);
-    const taskKey = buildTaskKey({
+    const baseTaskKey = buildTaskKey({
       taskId,
       pid,
       imageUrl: normalized.imageUrl,
@@ -86,14 +101,45 @@ export function validateDraftInputs(drafts: DraftInput[]): {
       prompt: normalized.prompt,
     });
 
-    valid.push({
-      taskKey,
-      resumeKeys: Array.from(new Set([taskKey, legacyTaskKey])),
+    preparedValid.push({
+      baseTaskKey,
+      legacyTaskKey,
       taskId: taskId ?? pid,
       imageUrl: normalized.imageUrl,
       prompt: normalized.prompt,
       inputRow: normalized.inputRow,
       sourceFile: normalized.sourceFile,
+    });
+  }
+
+  const valid: ValidatedInput[] = [];
+  const duplicateCounts = new Map<string, number>();
+  for (const task of preparedValid) {
+    duplicateCounts.set(task.baseTaskKey, (duplicateCounts.get(task.baseTaskKey) ?? 0) + 1);
+  }
+
+  const duplicateOffsets = new Map<string, number>();
+  for (const task of preparedValid) {
+    const duplicateCount = duplicateCounts.get(task.baseTaskKey) ?? 1;
+    const duplicateIndex = (duplicateOffsets.get(task.baseTaskKey) ?? 0) + 1;
+    duplicateOffsets.set(task.baseTaskKey, duplicateIndex);
+
+    // Keep identical rows independent by assigning a stable occurrence suffix within the same input file.
+    const taskKey = buildDuplicateAwareTaskKey(task.baseTaskKey, duplicateIndex, duplicateCount);
+    const resumeKeys = new Set<string>([taskKey]);
+    if (duplicateCount === 1) {
+      resumeKeys.add(task.baseTaskKey);
+      resumeKeys.add(task.legacyTaskKey);
+    }
+
+    valid.push({
+      taskKey,
+      resumeKeys: Array.from(resumeKeys),
+      taskId: task.taskId,
+      imageUrl: task.imageUrl,
+      prompt: task.prompt,
+      inputRow: task.inputRow,
+      sourceFile: task.sourceFile,
     });
   }
 

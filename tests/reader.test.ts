@@ -46,4 +46,31 @@ describe("readInputTasks", () => {
     assert.match(result.validTasks[1].taskKey, /^tid-2__[a-f0-9]{12}$/);
     assert.equal(result.invalidTasks.length, 0);
   });
+
+  it("treats identical rows as separate tasks", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "jimeng-reader-duplicate-"));
+    const csvPath = path.join(tempDir, "tasks.csv");
+
+    await fs.writeFile(
+      csvPath,
+      [
+        "image_url,prompt,pid",
+        "https://example.com/a.jpg,first,pid-1",
+        "https://example.com/a.jpg,first,pid-1",
+        "https://example.com/a.jpg,first,pid-1",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await readInputTasks(csvPath);
+
+    assert.equal(result.validTasks.length, 3);
+    assert.match(result.validTasks[0].taskKey, /^pid-1__[a-f0-9]{12}__dup1$/);
+    assert.match(result.validTasks[1].taskKey, /^pid-1__[a-f0-9]{12}__dup2$/);
+    assert.match(result.validTasks[2].taskKey, /^pid-1__[a-f0-9]{12}__dup3$/);
+    assert.equal(result.validTasks[0].resumeKeys.includes("pid-1"), false);
+    assert.equal(result.validTasks[1].resumeKeys.includes("pid-1"), false);
+    assert.equal(new Set(result.validTasks.map((task) => task.taskKey)).size, 3);
+  });
 });

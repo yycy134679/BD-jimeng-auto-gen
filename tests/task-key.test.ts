@@ -1,7 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildContentHash, buildLegacyTaskKey, buildTaskKey } from "../src/utils/hash.js";
+import {
+  buildContentHash,
+  buildDuplicateAwareTaskKey,
+  buildLegacyTaskKey,
+  buildTaskKey,
+} from "../src/utils/hash.js";
 
 describe("buildTaskKey", () => {
   it("builds composite key with taskId + content hash suffix", () => {
@@ -57,5 +62,17 @@ describe("buildTaskKey", () => {
 
     assert.notEqual(keyA, keyB);
     assert.notEqual(buildContentHash("https://example.com/a.jpg", "hello"), buildContentHash("https://example.com/a.jpg", "hello world"));
+  });
+
+  it("adds duplicate suffix only when the same content appears multiple times", () => {
+    const baseKey = buildTaskKey({
+      pid: "pid-99",
+      imageUrl: "https://example.com/a.jpg",
+      prompt: "hello",
+    });
+
+    assert.equal(buildDuplicateAwareTaskKey(baseKey, 1, 1), baseKey);
+    assert.equal(buildDuplicateAwareTaskKey(baseKey, 1, 3), `${baseKey}__dup1`);
+    assert.equal(buildDuplicateAwareTaskKey(baseKey, 2, 3), `${baseKey}__dup2`);
   });
 });

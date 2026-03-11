@@ -43,3 +43,15 @@ export function buildTaskKey(input: {
 
   return contentHash;
 }
+
+export function buildDuplicateAwareTaskKey(
+  baseTaskKey: string,
+  duplicateIndex: number,
+  duplicateCount: number,
+): string {
+  if (duplicateCount <= 1) {
+    return baseTaskKey;
+  }
+
+  return `${baseTaskKey}__dup${duplicateIndex}`;
+}
