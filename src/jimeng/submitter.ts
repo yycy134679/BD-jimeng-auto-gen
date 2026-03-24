@@ -172,10 +172,18 @@ export class JimengSubmitter {
     await this.lockCriticalOptionsRightBeforeSubmit(task.taskKey);
     await this.waitForSubmitInterval(task.taskKey);
     const baselineBodyText = await this.page.evaluate(() => document.body.innerText ?? "");
+    const baselineQueueActionCount = await this.readQueueActionCount();
+    const baselineGeneratingCount = await this.readGeneratingIndicatorActiveCount();
     await submitButton.click({ timeout: this.config.timeouts.actionMs });
     this.lastSubmitClickedAt = Date.now();
 
-    await this.waitForSubmissionOutcome(task.taskKey, baselineBodyText, task.prompt);
+    await this.waitForSubmissionOutcome(
+      task.taskKey,
+      baselineBodyText,
+      baselineQueueActionCount,
+      baselineGeneratingCount,
+      task.prompt,
+    );
   }
 
   private async gotoCreatePage(): Promise<void> {
@@ -345,7 +353,8 @@ export class JimengSubmitter {
         await combo.waitFor({ state: "visible", timeout: 1_500 });
         await combo.click({ timeout: 2_000 });
 
-        const optionMatched = await this.clickDropdownOption(targetLabel);
+        const popup = await this.findComboboxPopup(combo);
+        const optionMatched = popup ? await this.clickDropdownOption(targetLabel, popup) : false;
         if (optionMatched) {
           await this.page.waitForTimeout(150);
           return true;
@@ -358,27 +367,52 @@ export class JimengSubmitter {
       }
     }
 
-    // 3) Last fallback: click a visible exact text node directly.
-    if (await clickByText(this.page, targetLabel, Math.min(this.config.timeouts.actionMs, 3_000))) {
+    // 3) Last fallback: only use whole-page exact text when the page is not combobox-driven.
+    if (maxProbe === 0 && (await clickByText(this.page, targetLabel, Math.min(this.config.timeouts.actionMs, 3_000)))) {
       return true;
     }
 
     return false;
   }
 
-  private async clickDropdownOption(targetLabel: string): Promise<boolean> {
+  private async findComboboxPopup(combo: Locator): Promise<Locator | undefined> {
+    const popupId = await combo.getAttribute("aria-controls");
+    const candidates = [
+      popupId ? this.page.locator(`[id="${popupId}"]`).first() : undefined,
+      this.page.locator("[role='listbox']").last(),
+      this.page.locator(".lv-select-popup-inner").last(),
+    ].filter((candidate): candidate is Locator => Boolean(candidate));
+
+    for (const candidate of candidates) {
+      if ((await candidate.count()) === 0) {
+        continue;
+      }
+
+      try {
+        await candidate.waitFor({ state: "visible", timeout: 800 });
+        return candidate;
+      } catch {
+        continue;
+      }
+    }
+
+    return undefined;
+  }
+
+  private async clickDropdownOption(targetLabel: string, root: Locator): Promise<boolean> {
     const optionSelectors = [
+      "[class*='option-label']",
+      "[class*='select-option-label']",
       "[role='option']",
       ".lv-select-option",
       ".lv-select-option-content",
       "li[role='option']",
-      "li",
       "div[class*='option']",
       "div[class*='item']",
     ];
 
     for (const selector of optionSelectors) {
-      const candidates = this.page.locator(selector);
+      const candidates = root.locator(selector);
       if (await this.clickExactTextCandidate(candidates, targetLabel)) {
         return true;
       }
@@ -562,18 +596,22 @@ export class JimengSubmitter {
   private async waitForSubmissionOutcome(
     taskKey: string,
     baselineBodyText: string,
+    baselineQueueActionCount: number,
+    baselineGeneratingCount: number,
     prompt: string,
   ): Promise<void> {
     const successTargets = this.config.selectors.successToastTexts;
     const rateLimitTargets = this.config.selectors.rateLimitTexts;
     const violationTargets = this.config.selectors.policyViolationTexts;
-    const inferredSuccessTargets = ["生成中", "再次生成"];
+    const inferredSuccessTargets = ["生成中", "再次生成", "排队加速中", "取消生成"];
     const promptProbe = this.buildPromptProbe(prompt);
 
     try {
       const handle = await this.page.waitForFunction(
         ({
           baseline,
+          baselineQueueControls,
+          baselineGeneratingTasks,
           successTexts,
           rateLimitTexts,
           violationTexts,
@@ -581,6 +619,8 @@ export class JimengSubmitter {
           promptProbeText,
         }: {
           baseline: string;
+          baselineQueueControls: number;
+          baselineGeneratingTasks: number;
           successTexts: string[];
           rateLimitTexts: string[];
           violationTexts: string[];
@@ -605,7 +645,28 @@ export class JimengSubmitter {
             return count;
           };
 
+          const parseGeneratingIndicator = (source: string): number => {
+            const normalized = source.replace(/\s+/g, "");
+            const match = normalized.match(/(?:^|[^\d])(\d+)\/(\d+)生成中/);
+            if (!match) {
+              return 0;
+            }
+
+            return Number(match[2]);
+          };
+
           const currentText = document.body.innerText ?? "";
+          const currentQueueControls = document.querySelectorAll(
+            "[class*='cancel-queue-popover'], [class*='cancel-queue'], [class*='trigger-zMUqlJ']",
+          ).length;
+          const currentGeneratingTasks = parseGeneratingIndicator(currentText);
+
+          if (currentQueueControls > baselineQueueControls) {
+            return { type: "success", text: "queue_control_added" };
+          }
+          if (currentGeneratingTasks > baselineGeneratingTasks) {
+            return { type: "success", text: `generating_count:${baselineGeneratingTasks}->${currentGeneratingTasks}` };
+          }
 
           for (const text of rateLimitTexts) {
             const baselineCount = countOccurrences(baseline, text);
@@ -653,6 +714,8 @@ export class JimengSubmitter {
         },
         {
           baseline: baselineBodyText,
+          baselineQueueControls: baselineQueueActionCount,
+          baselineGeneratingTasks: baselineGeneratingCount,
           successTexts: successTargets,
           rateLimitTexts: rateLimitTargets,
           violationTexts: violationTargets,
@@ -822,6 +885,45 @@ export class JimengSubmitter {
     }
 
     return normalized.slice(0, 18);
+  }
+
+  private async readQueueActionCount(): Promise<number> {
+    return this.page.evaluate(
+      () =>
+        document.querySelectorAll(
+          "[class*='cancel-queue-popover'], [class*='cancel-queue'], [class*='trigger-zMUqlJ']",
+        ).length,
+    );
+  }
+
+  private async readGeneratingIndicatorActiveCount(): Promise<number> {
+    const candidateTexts = await this.page.evaluate(() => {
+      const selectors = [
+        "[data-task-indicator='true']",
+        "[data-task-indicator-container='true']",
+      ];
+      const texts = new Set<string>();
+
+      for (const selector of selectors) {
+        for (const node of Array.from(document.querySelectorAll(selector))) {
+          const text = (node.textContent ?? "").replace(/\s+/g, " ").trim();
+          if (text) {
+            texts.add(text);
+          }
+        }
+      }
+
+      return Array.from(texts);
+    });
+
+    for (const text of candidateTexts) {
+      const parsed = parseGeneratingQueueIndicatorText(text);
+      if (parsed) {
+        return parsed.activeCount;
+      }
+    }
+
+    return 0;
   }
 
   private async waitForSubmitInterval(taskKey: string): Promise<void> {
